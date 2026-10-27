@@ -10,6 +10,38 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+
+    // =========================================================================
+    // РЕПОЗИТОРИИ МОД-ЗАВИСИМОСТЕЙ (CurseMaven / Modrinth / BlameJared)
+    // =========================================================================
+
+    // CurseMaven — прокси над CurseForge: позволяет тянуть jar'ы модов как maven-артефакты.
+    // Формат зависимости: "curse.maven:<project-slug>-<numeric-project-id>:<file-id>"
+    maven {
+        name = 'CurseMaven'
+        url = 'https://api.curse.tools/v1/curse/'
+        content { includeGroup 'curse.maven' }
+    }
+
+    // Modrinth Maven — более современный и стабильный вариант для Create на NeoForge.
+    // Формат: "maven.modrinth:<project-id>:<version-id-or-range>"
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+
+    // BlameJared maven — официальный maven JEI/patcher; нужен, если захочешь
+    // compileOnly-зависимость от API-артефактов Create (см. комментарии в dependencies).
+    maven {
+        name = 'ParchmentMC' // mappings уже заданы в neoForge{}, но держим на всякий случай
+        url = 'https://maven.parchmentmc.org'
+    }
+    maven {
+        name = 'Cosmopolitan (Create public maven)' // зеркало артефактов simibubi/Create
+        url = 'https://maven.jaredlll08.com/releases'
+        content { includeGroupByRegex 'com\.simibubi.*' }
+    }
 }
 
 base {
@@ -96,26 +128,58 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 
 dependencies {
-    // Example mod dependency with JEI
-    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
-    // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
-    // compileOnly "mezz.jei:jei-${mc_version}-forge-api:${jei_version}"
-    // runtimeOnly "mezz.jei:jei-${mc_version}-forge:${jei_version}"
+    // =====================================================================
+    // ЗАВИСИМОСТИ МОДА-БРИДЖА
+    //
+    // ВАЖНО ПРО НОВИЧКА: нам НЕ нужны .java-классы этих модов для компиляции,
+    // потому что мы общаемся с ними через:
+    //   1) строковые ID блоков/жидкостей (Registries + ResourceLocation),
+    //   2) стандартную NeoForge Capability FluidHandler.BLOCK,
+    //   3) рефлексивный «мост» к Cold Sweat (см. ColdSweatBridge.java).
+    // Поэтому достаточно runtimeOnly — jar просто кладётся в run/mods.
+    // =====================================================================
 
-    // Example mod dependency using a mod jar from ./libs with a flat dir repository
-    // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
-    // The group id is ignored when searching -- in this case, it is "blank"
-    // implementation "blank:coolmod-${mc_version}:${coolmod_version}"
+    // --- Create 6 (NeoForge port для 1.21.1) через MODRINTH ------------------
+    // Project id на Modrinth: "create". Версию смотри на странице мода -> Versions.
+    // Если artifact с таким именем не найдётся — скачай jar вручную с Modrinth
+    // и положи в libs/ (заглушка ниже подключена).
+    runtimeOnly "maven.modrinth:create:${create_version}"
 
-    // Example mod dependency using a file as dependency
-    // implementation files("libs/coolmod-${mc_version}-${coolmod_version}.jar")
+    // --- Cold Sweat через CURSEMEN ------------------------------------------------
+    // CurseForge project cold-sweat: https://www.curseforge.com/minecraft/mc-mods/cold-sweat
+    // На CurseMaven id берётся из URL страницы файлов: curse.maven:cold-sweat-<PROJECT_ID>:<FILE_ID>
+    // PROJECT_ID и FILE_ID нужно подставить актуальные (см. инструкцию в README-комментарии).
+    // Заглушка: если numeric ids неизвестны, скачай jar Cold Sweat (NeoForge 1.21.1)
+    // с CurseForge и раскомментируй file-dependency внизу.
+    // runtimeOnly "curse.maven:cold-sweat-XXXXXX:YYYYYYY"
 
-    // Example project dependency using a sister or child project:
-    // implementation project(":myproject")
+    // --- Create: Going Nuclear ------------------------------------------------------
+    // ВНИМАНИЕ: актуальный порт Going Nuclear под NeoForge 1.21 может отсутствовать
+    // на maven. Наш код НЕ требует его классов — реакторы обнаруживаются по whitelist
+    // ID блоков из конфига (Config.reactorBlockWhitelist), который ты пополняешь сам.
+    // Когда получишь jar — просто добавь его в run/mods/, ничего в коде менять не надо.
+    // runtimeOnly files('libs/going-nuclear-neoforge.jar')
+
+    // --- Локальные заглушки (fallback, если maven недоступен) --------------------
+    // Положи скачанные jar'ы в ./libs — Gradle подхватит их автоматически:
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+
+    // Если захочешь вызывать API Create напрямую (а не через capabilities),
+    // добавь compileOnly-зависимость и зарегистрируй её классы в IDE:
+    // compileOnly "maven.modrinth:create:${create_version}"
 
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+}
+
+// ModDev plugin должен видеть эти jar'ы в classpath рантайм-прогона:
+neoForge {
+    runs.configureEach {
+        mods {
+            // Create/Cold Sweat подгружаются как обычные моды из run/mods при запуске
+        }
+    }
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
