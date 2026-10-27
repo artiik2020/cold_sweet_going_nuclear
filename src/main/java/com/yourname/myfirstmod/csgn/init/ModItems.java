@@ -6,30 +6,32 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * Здесь регистрируются все предметы мода.
- *
- * Важно: чтобы блок можно было поставить из руки, у него должен быть BlockItem —
- * «предмет-блок». registerSimpleBlockItem привязывает предмет к уже зарегистрированному блоку.
+ * Регистрация предметов. Чтобы блок можно было держать в руке и ставить,
+ * у него должен быть BlockItem — «предмет-блок».
  */
 public class ModItems {
 
     public static final DeferredRegister.Items ITEMS =
             DeferredRegister.createItems(Csgn.MODID);
 
-    // Предмет для блока-сердцевины реактора (ID: csgn:reactor_core)
+    // Предмет для csgn:reactor_core
     public static final DeferredItem<Item> REACTOR_CORE_ITEM =
             ITEMS.registerSimpleBlockItem("reactor_core", ModBlocks.REACTOR_CORE);
 
+    // Предмет для csgn:radiator
+    public static final DeferredItem<Item> RADIATOR_ITEM =
+            ITEMS.registerSimpleBlockItem("radiator", ModBlocks.RADIATOR);
+
     // =====================================================================================
-    // TODO: Artem's Task — Создай свой первый предмет!
-    // Пример: предмет «стержень с ураном» (пока просто обычный предмет без логики):
+    // TODO: Artem's Task — Создай свой первый предмет! Например «стержень с ураном»:
     //
     // public static final DeferredItem<Item> URANIUM_ROD =
     //         ITEMS.registerSimpleItem("uranium_rod", new Item.Properties().stacksTo(16));
     //
     // Тебя ждут:
-    //  1) модель  assets/csgn/items/uranium_rod.json  (см. пример у existing items)
-    //  2) картинка assets/csgn/textures/item/uranium_rod.png (16x16 PNG)
-    //  3) название в lang-файлах: "item.csgn.uranium_rod": "Uranium Rod"
+    //  1) картинка assets/csgn/textures/item/uranium_rod.png (16x16 PNG);
+    //  2) название "item.csgn.uranium_rod" в lang-файлах;
+    //  3) простой крафт data/csgn/recipe/uranium_rod.json — шаблон уже лежит
+    //     в data/csgn/recipe/reactor_core.json, скопируй и поменяй items.
     // =====================================================================================
 }

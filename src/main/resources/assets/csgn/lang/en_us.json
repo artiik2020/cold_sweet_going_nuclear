@@ -1,5 +1,7 @@
 {
-  "itemGroup.csgn": "Example Mod Tab",
+  "itemGroup.csgn": "CSGN Bridge",
   "block.csgn.example_block": "Example Block",
-  "item.csgn.example_item": "Example Item"
+  "item.csgn.example_item": "Example Item",
+  "block.csgn.reactor_core": "Reactor Core (test)",
+  "block.csgn.radiator": "Steam Radiator"
 }

@@ -77,3 +77,27 @@ side = "BOTH"
 # stop your mod loading on the server for example.
 #[features."${mod_id}"]
 #openGLVersion="[3.2,)"
+
+# ===================== CSGN BRIDGE DEPENDENCIES =====================
+# Все три мода — ОПЦИОНАЛЬНЫЕ (optional): бридж деградирует gracefully,
+# если чего-то нет. Версионные диапазоны подкрути под свои сборки.
+[[dependencies."${mod_id}"]]
+modId = "create"
+type = "optional"
+versionRange = "[6.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "coldsweat"
+type = "optional"
+versionRange = "[2.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "goingnuclear"
+type = "optional"
+versionRange = "[0.0,)"
+ordering = "AFTER"
+side = "BOTH"
