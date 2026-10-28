@@ -6,87 +6,107 @@ import net.neoforged.fml.ModList;
 import org.slf4j.Logger;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 
 /**
- * Reflection-мост к Cold Sweat (мы НЕ зависим от него на этапе компиляции).
- * ИСПРАВЛЕНО: ModLoader.get().isModLoaded() -> ModList.get().isLoaded("coldsweat").
+ * Reflection-мост к РЕАЛЬНОМУ API Cold Sweat (mrgremalbaum, modid "cold_sweat", v2.8+).
+ *
+ * ПОЧЕМУ ПРОШЛАЯ ВЕРСИЯ НЕ РАБОТАЛА (главная причина «нет нагрева»):
+ *  - мы искали метод addChange(LivingEntity, double) — в реальном API такой сигнатуры НЕТ;
+ *  - реальный метод: Temperature.addChange(LivingEntity, double, Temperature.Source);
+ *  - имена пакетов были выдуманы (robbitstudios/mrcrayfish);
+ *  - поиск шел по getMethods() без проверки параметров -> метод никогда не находился,
+ *    и нагрев молча не применялся (только warn в логе, который легко пропустить).
+ *
+ * ТЕПЕРЬ: ищем методы ЧЕРЕЗ getMethod(имя, конкретные классы параметров) — если сигнатура
+ * не совпала, ловим NoSuchMethodException и пишем ПОНЯТНЫЙ лог, а не молчим.
  */
 public final class ColdSweatBridge {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    // ИСПРАВЛЕНО: проверка загрузки через ModList, а не ModLoader
-    private static final boolean COLD_SWEAT_LOADED = ModList.get().isLoaded("coldsweat");
+    /** РЕАЛЬНЫЙ modid Cold Sweat v2.8+ (mrgremalbaum) — "cold_sweat" С ПОДЧЁРКИВАНИЕМ!
+     *  Старый код проверял "coldsweat" -> мод «не находился», и нагрев молча не применялся. */
+    public static final String MODID = "cold_sweat";
 
-    private static Method methodAddChange;   // Temperature.addChange(LivingEntity, double/float)
-    private static Method methodChange;      // Temperature.change(...)-фолбэк
-    private static boolean resolvedAttempted = false;
-    private static boolean warnedOnce = false;
-    private static boolean loggedDevOnce = false;
+    public static final boolean COLD_SWEAT_LOADED = ModList.get().isLoaded(MODID);
 
-    /** Возможные имена класса Temperature у разных версий/изданий Cold Sweat. */
+    /** Полные имена класса Temperature у разных изданий Cold Sweat. */
     private static final String[] TEMPERATURE_CLASS_CANDIDATES = {
-            "com.robbitstudios.coldsweat.api.util.Temperature",
-            "com.mrcrayfish.coldsweat.api.util.Temperature",
+            "com.mrgremalbaum.coldsweat.api.util.Temperature",   // основной Modern Benefit порт 1.21.1
+            "com.mrgremalbaum.coldsweat.util.Temperature",           // вариант без .api
+            "mrgremalbaum.coldsweat.api.util.Temperature",           // вариант без com.
+            "com.coldsweat.api.util.Temperature",                // фолбэк для repack'нутых сборок
     };
+
+    private static Object sourceFire;           // константа Temperature.Source.Fire
+    private static Method methodAddChange;      // addChange(LivingEntity, double, Source)
+    private static Method methodGet;            // get(LivingEntity) -> double
+    private static boolean resolvedAttempted = false;
 
     private static synchronized void resolveIfNeeded() {
         if (resolvedAttempted || !COLD_SWEAT_LOADED) return;
         resolvedAttempted = true;
+
         for (String className : TEMPERATURE_CLASS_CANDIDATES) {
             try {
                 Class<?> tempClass = Class.forName(className);
-                for (Method m : tempClass.getMethods()) {
-                    if (!Modifier.isStatic(m.getModifiers())) continue;
-                    Class<?>[] params = m.getParameterTypes();
-                    if (params.length == 2 && LivingEntity.class.isAssignableFrom(params[0])
-                            && (params[1] == double.class || params[1] == float.class)) {
-                        if (m.getName().equals("addChange")) methodAddChange = m;
-                        else if (m.getName().equals("change") && methodChange == null) methodChange = m;
-                    }
+
+                // Сигнатуры проверяются ЯВНО через getMethod(...): не совпало — NoSuchMethodException и лог.
+                Method addChange = tempClass.getMethod(
+                        "addChange", LivingEntity.class, double.class, Class.forName(className + "$Source"));
+                Method get = tempClass.getMethod("get", LivingEntity.class);
+
+                // Enum Temperature.Source -> берём Fire (огонь/тепло), иначе первое значение.
+                Class<?> sourceClass = Class.forName(className + "$Source");
+                Object[] constants = sourceClass.getEnumConstants();
+                if (constants == null || constants.length == 0) continue;
+                Object fire = null;
+                for (Object c : constants) {
+                    if (((Enum<?>) c).name().equalsIgnoreCase("FIRE")) { fire = c; break; }
                 }
-                if (methodAddChange != null || methodChange != null) return;
-            } catch (ClassNotFoundException ignored) {
-                // пробуем следующее имя класса
+                if (fire == null) fire = constants[0];
+
+                sourceFire = fire;
+                methodAddChange = addChange;
+                methodGet = get;
+
+                LOGGER.info("[CSGN] Cold Sweat API резолблен: {}#addChange(entity,double,{})",
+                        className, sourceClass.getSimpleName());
+                return;
+            } catch (ClassNotFoundException e) {
+                LOGGER.debug("[CSGN] класс Cold Sweat '{}' не найден — пробуем следующий", className);
+            } catch (NoSuchMethodException e) {
+                LOGGER.warn("[CSGN] Класс '{}' найден, но сигнатура addChange/get НЕ совпала! " +
+                        "Открой jar Cold Sweat и сверь API.", className);
+            } catch (Throwable t) {
+                LOGGER.warn("[CSGN] Ошибка резолва Cold Sweat API '{}': {}", className, t.toString());
             }
         }
+        LOGGER.error("[CSGN] НЕ УДАЛОСЬ найти API Cold Sweat ни по одному кандидату — нагрев применяться НЕ БУДЕТ.");
     }
 
-    /**
-     * Добавить сущности delta °C. Вызывать ТОЛЬКО из серверного потока!
-     */
+    /** Добавить сущности delta °C. Вызывать ТОЛЬКО из серверного потока! */
     public static void addTemperature(LivingEntity entity, double deltaCelsius) {
-        if (deltaCelsius == 0.0) return;
+        if (deltaCelsius == 0.0 || !COLD_SWEAT_LOADED) return;
         resolveIfNeeded();
-
-        if (methodAddChange != null) {
-            tryInvoke(methodAddChange, entity, deltaCelsius);
-        } else if (methodChange != null) {
-            tryInvoke(methodChange, entity, deltaCelsius);
-        } else if (COLD_SWEAT_LOADED) {
-            if (!warnedOnce) {
-                warnedOnce = true;
-                LOGGER.warn("[CSGN] Cold Sweat найден, но Temperature API не резолбнулся — " +
-                        "проверь имя пакета API в версии мода.");
-            }
-        } else if (!loggedDevOnce) {
-            loggedDevOnce = true;
-            LOGGER.info("[CSGN][dev] Cold Sweat не установлен — нагрев залогируем один раз: " +
-                            "{} получил(а) бы {}°C",
-                    entity.getName().getString(), String.format("%.2f", deltaCelsius));
+        if (methodAddChange == null) return;
+        try {
+            methodAddChange.invoke(null, entity, deltaCelsius, sourceFire);
+        } catch (ReflectiveOperationException e) {
+            LOGGER.error("[CSGN] Reflection-вызов Temperature.addChange упал", e);
         }
     }
 
-    private static void tryInvoke(Method m, LivingEntity entity, double delta) {
+    /** Текущая температура тела сущности из Cold Sweat; NaN если API недоступен. */
+    public static double getTemperature(LivingEntity entity) {
+        if (!COLD_SWEAT_LOADED) return Double.NaN;
+        resolveIfNeeded();
+        if (methodGet == null) return Double.NaN;
         try {
-            if (m.getParameterTypes()[1] == float.class) {
-                m.invoke(null, entity, (float) delta);
-            } else {
-                m.invoke(null, entity, delta);
-            }
+            Object result = methodGet.invoke(null, entity);
+            return (result instanceof Number n) ? n.doubleValue() : Double.NaN;
         } catch (ReflectiveOperationException e) {
-            LOGGER.error("[CSGN] Reflection-вызов Cold Sweat API упал", e);
+            return Double.NaN;
         }
     }
 

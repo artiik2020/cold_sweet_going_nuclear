@@ -39,7 +39,7 @@ public final class CondensationHandler {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
 
         // ИСПРАВЛЕНО: getTickCount() нет в 1.21.1 — используем level.getGameTime()
-        if (level.getGameTime() % Config.condenseIntervalTicks != 0) return;
+        if (level.getGameTime() % Math.max(1, Config.condenseIntervalTicks) != 0) return;
 
         HeatZoneManager zones = HeatZoneManager.get(level);
         if (zones == null || zones.pipeCount() == 0) return;

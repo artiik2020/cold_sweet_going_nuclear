@@ -49,7 +49,7 @@ public final class SteamPipeHeatHandler {
     public void onLevelTick(LevelTickEvent.Post event) {
         if (!Config.steamPipeEffectsEnabled) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        if (level.getGameTime() % Config.condenseIntervalTicks != 0) return;
+        if (level.getGameTime() % Math.max(1, Config.condenseIntervalTicks) != 0) return;
 
         HeatZoneManager zones = HeatZoneManager.get(level);
         if (zones == null) return;
@@ -80,10 +80,19 @@ public final class SteamPipeHeatHandler {
         }
     }
 
-    /** Дёргаем FluidHandler capability ТОЛЬКО для конкретной позиции. */
+    /**
+     * Дёргаем FluidHandler capability ТОЛЬКО для конкретной позиции.
+     * ВАЖНОЕ ИСПРАВЛЕНИЕ: у FluidTank/FluidPipe Create естьcapability и на CLIENT'е,
+     * но содержимое танков синхронизируется на клиент НЕ полностью — труба могла
+     * «не видеть» пар. Поэтому проверяем наличие пара ТОЛЬКО на серверном уровне,
+     * а Direction передаём как null (у Create FluidHandler это «любая сторона»).
+     */
     private boolean checkHasSteam(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        BlockEntity be = state.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+        // Исправление №1: не требовать BlockEntity вручную — getCapability сам разберётся;
+        // но BE всё равно нужен для сигнатуры — берём его без проверки hasBlockEntity(),
+        // т.к. уровень вернёт null для блоков без BE и Create это устраивает.
+        BlockEntity be = level.getBlockEntity(pos);
         var handler = level.getCapability(Capabilities.FluidHandler.BLOCK, pos, state, be, null);
         return SteamFluidHelper.containsSteam(handler);
     }

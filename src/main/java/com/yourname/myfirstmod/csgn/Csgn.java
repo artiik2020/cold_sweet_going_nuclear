@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.yourname.myfirstmod.csgn.init.ModAttachments;
 import com.yourname.myfirstmod.csgn.init.ModBlocks;
 import com.yourname.myfirstmod.csgn.init.ModItems;
+import com.yourname.myfirstmod.csgn.integration.ColdSweatBridge;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.ModList;
@@ -43,18 +44,34 @@ public class Csgn {
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.ReactorEventHandler());
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.SteamPipeHeatHandler());
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.CondensationHandler());
+        NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.debug.CsgnDebug());
+
+        // 5) ПЕРВЫЙ refresh() конфига. Без него статические поля Config останутся
+        //    дефолтами (radius=100 из TOML не применятся, whitelist будет пустым Set.of(),
+        //    а heatApplyIntervalTicks=0 -> деление на ноль / %0 -> IllegalArgumentException,
+        //    и тик-хендлеры молча упадут в лог). NeoForge обычно грузит конфиг до конструктора,
+        //    но событие Loading могло пройти раньше подписки — поэтому принудительно рефрешимся.
+        try {
+            Config.SPEC.getValues(); // инициализация Toml
+            Config.forceRefreshFromLoadedSpec();
+        } catch (Throwable t) {
+            LOGGER.warn("[CSGN] Ранний refresh конфига не удался, подождём событие Loading: {}", t.toString());
+        }
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         // ПРОВЕРКА ЗАГРУЖЕННОСТИ МОДОВ: ModLoader.get().isModLoaded() запрещён —
         // используем net.neoforged.fml.ModList.get().isLoaded(...)
         boolean createLoaded = ModList.get().isLoaded("create");
-        boolean coldSweatLoaded = ModList.get().isLoaded("coldsweat");
+        boolean coldSweatLoaded = ModList.get().isLoaded(ColdSweatBridge.MODID); // РЕАЛЬНЫЙ modid Cold Sweat v2.8+ (mrgremalbaum)
         boolean goingNuclearLoaded = ModList.get().isLoaded("goingnuclear");
 
         LOGGER.info("[CSGN] Bridge init. create={}, coldsweat={}, goingnuclear={}",
                 createLoaded, coldSweatLoaded, goingNuclearLoaded);
-        LOGGER.info("[CSGN] Реакторы: enabled={}, radius={}, mult={}",
-                Config.reactorEffectsEnabled, Config.reactorHeatRadius, Config.reactorHeatMultiplier);
+        LOGGER.info("[CSGN] Реакторы: enabled={}, radius={}, mult={}, whitelist={}",
+                Config.reactorEffectsEnabled, Config.reactorHeatRadius,
+                Config.reactorHeatMultiplier, Config.reactorBlockWhitelist);
+        LOGGER.info("[CSGN] Пар: enabled={}, radius={}, fluidPrefixes={}",
+                Config.steamPipeEffectsEnabled, Config.steamPipeHeatRadius, Config.steamFluidPrefixes);
     }
 }

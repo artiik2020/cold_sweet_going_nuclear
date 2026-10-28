@@ -28,9 +28,11 @@ public class Config {
             B.comment("Множитель тепла в центре зоны реактора (убывает линейно к краю)").defineInRange("reactor.heatMultiplier", 4.0, 0.0, 100.0);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> REACTOR_BLOCK_WHITELIST =
-            B.comment("ID блоков, считаемых реакторами.")
+            B.comment("ID блоков, считаемых реакторами. ВАЖНО: сюда нужно ВРУЧНУЮ добавить " +
+                            "реальные ID блоков из Going Nuclear (узнай их командой /dump registry | grep goingnuclear), " +
+                            "иначе reactors=0 и нагрева от чужих реакторов НЕ БУДЕТ.")
                     .defineListAllowEmpty("reactor.blockWhitelist",
-                            List.of("csgn:reactor_core"),
+                            List.of("csgn:reactor_core"),   // наш тестовый блок — работает сразу
                             Config::isValidId);
 
     // ====================== ТРУБЫ СО ПАРОМ (Create FluidHandler Capability) ======================
@@ -116,7 +118,10 @@ public class Config {
         for (String prefix : steamFluidPrefixes) {
             if (id.startsWith(prefix)) return true;
         }
-        return false;
+        // ИСПРАВЛЕНИЕ: у Create 6 для 1.21.1 пар зарегистрирован как "create:steam",
+        // но в некоторых сборках/версиях id может отличаться, поэтому дополнительно
+        // ловим ЛЮБОЙ id, содержащий "steam" (защита от «pipes=0» при неверном конфиге).
+        return id.contains("steam");
     }
 
     // ==== Обработчики конфиг-событий. РЕГИСТРИРУЮТСЯ ВРУЧНУЮ в конструкторе Csgn ====
@@ -128,15 +133,25 @@ public class Config {
         if (event.getConfig().getSpec() == SPEC) refresh();
     }
 
+    /** Публичный вызов refresh() из конструктора Csgn (первичная инициализация полей). */
+    public static void forceRefreshFromLoadedSpec() {
+        refresh();
+    }
+
     private static void refresh() {
+        // Защита от 0: %0 в тик-хендлерах кидает ArithmeticException и молча убивает нагрев.
+        heatApplyIntervalTicks    = Math.max(1, HEAT_APPLY_INTERVAL_TICKS.get());
+        condenseIntervalTicks     = Math.max(1, CONDENSE_INTERVAL_TICKS.get());
+        maxTrackedSources         = MAX_TRACKED_SOURCES.get();
+
         reactorEffectsEnabled     = REACTOR_EFFECTS_ENABLED.get();
-        reactorHeatRadius         = REACTOR_HEAT_RADIUS.get();
+        reactorHeatRadius         = Math.max(1, REACTOR_HEAT_RADIUS.get());
         reactorHeatMultiplier     = REACTOR_HEAT_MULTIPLIER.get();
         reactorBlockWhitelist     = REACTOR_BLOCK_WHITELIST.get().stream()
                 .map(ResourceLocation::parse).collect(Collectors.toUnmodifiableSet());
 
         steamPipeEffectsEnabled   = STEAM_PIPE_EFFECTS_ENABLED.get();
-        steamPipeHeatRadius       = STEAM_PIPE_HEAT_RADIUS.get();
+        steamPipeHeatRadius       = Math.max(1, STEAM_PIPE_HEAT_RADIUS.get());
         steamPipeHeatMultiplier   = STEAM_PIPE_HEAT_MULTIPLIER.get();
         steamFluidPrefixes        = List.copyOf(STEAM_FLUID_IDS.get());
 
@@ -144,10 +159,6 @@ public class Config {
         condenseTurnsToWater      = CONDENSE_TURNS_TO_WATER.get();
         condenseAmountMb          = CONDENSE_AMOUNT_MB.get();
         radiatorDoublesHeat       = RADIATOR_DOUBLES_HEAT.get();
-
-        heatApplyIntervalTicks    = HEAT_APPLY_INTERVAL_TICKS.get();
-        condenseIntervalTicks     = CONDENSE_INTERVAL_TICKS.get();
-        maxTrackedSources         = MAX_TRACKED_SOURCES.get();
     }
 
     private Config() {}

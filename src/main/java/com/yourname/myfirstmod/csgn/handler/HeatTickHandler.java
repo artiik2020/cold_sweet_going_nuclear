@@ -37,9 +37,10 @@ public final class HeatTickHandler {
 
         // ИСПРАВЛЕНО: gameTime -> level.getGameTime()
         long gameTime = level.getGameTime();
-        if (gameTime % Config.heatApplyIntervalTicks != 0) return;
+        int interval = Math.max(1, Config.heatApplyIntervalTicks); // защита от %0
+        if (gameTime % interval != 0) return;
 
-        double secondsPerApply = Config.heatApplyIntervalTicks / 20.0;
+        double secondsPerApply = interval / 20.0;
 
         // getAll() — единственный Iterable-метод LevelEntityGetter в 1.21.1
         for (Entity entity : level.getEntities().getAll()) {
