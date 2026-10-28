@@ -8,6 +8,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
+import java.util.List;
+
 /**
  * «Сердце» бриджа: применяет накопленное тепло зонам к LivingEntity через ColdSweatBridge.
  * ИСПРАВЛЕНИЯ 1.21.1:
@@ -34,7 +36,11 @@ public final class HeatTickHandler {
 
         double secondsPerApply = Config.heatApplyIntervalTicks / 20.0;
 
-        for (Entity entity : level.getEntities()) {
+        // ИСПРАВЛЕНО: у ServerLevel нет метода getEntities() без параметров,
+        // возвращающего Iterable — он отдаёт LevelEntityGetter<Entity>, который
+        // в for-each использовать нельзя. Берём живой список сущностей уровня:
+        List<Entity> entities = level.entitiesForSerialization(); // снимок всех сущностей
+        for (Entity entity : entities) {
             if (!(entity instanceof LivingEntity living)) continue;
 
             double heat = zones.heatAt(living.blockPosition());
