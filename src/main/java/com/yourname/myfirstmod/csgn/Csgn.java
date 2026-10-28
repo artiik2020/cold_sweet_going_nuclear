@@ -86,6 +86,7 @@ public class Csgn {
         // Register existing example config and the bridge integration config.
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         modContainer.registerConfig(ModConfig.Type.SERVER, BridgeConfig.SPEC);
+        modEventBus.addListener(BridgeConfig::onConfigReload);
 
         // Bridge world events are registered explicitly on the gameplay event bus.
         NeoForge.EVENT_BUS.addListener(PositionCache::onBlockPlace);

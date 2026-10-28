@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Calculates local heat from cached reactor candidates.
@@ -15,8 +17,13 @@ import java.util.List;
  */
 public final class ReactorHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/HeatTickHandler");
+    private static final Set<String> LOGGED_REACTORS = ConcurrentHashMap.newKeySet();
 
     private ReactorHandler() {}
+
+    public static void resetDiagnostics() {
+        LOGGED_REACTORS.clear();
+    }
 
     public static double heatForPlayer(ServerLevel level, ServerPlayer player) {
         double radius = BridgeConfig.REACTOR_RADIUS.get();
@@ -46,7 +53,14 @@ public final class ReactorHandler {
 
             double distance = Math.sqrt(distanceSquared);
             double falloff = Math.max(0.0, 1.0 - distance / radius);
-            total += BridgeConfig.REACTOR_HEAT_MULTIPLIER.get() * falloff;
+            double multiplier = BridgeConfig.REACTOR_HEAT_MULTIPLIER.get();
+            total += multiplier * falloff;
+
+            String logKey = level.dimension().location() + "|" + reactor;
+            if (LOGGED_REACTORS.add(logKey)) {
+                LOGGER.info("Реактор найден, читаю конфиг: radius={}, heatMultiplier={}, pos={}, distance={}, player={}",
+                    BridgeConfig.REACTOR_RADIUS.get(), multiplier, reactor, distance, player.getGameProfile().getName());
+            }
         }
 
         for (BlockPos pos : stale) {

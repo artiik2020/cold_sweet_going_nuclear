@@ -7,18 +7,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * One server-side tick handler for both heat sources.
- * LevelTickEvent.Post is per level, so every dimension is processed separately.
+ * Single server-side entry point for calculating the combined local heat contribution.
+ * Values are read from BridgeConfig at runtime, not copied into static startup fields.
  */
 public final class HeatTickHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/HeatTickHandler");
-    private static final double MAX_HEAT_OFFSET = 0.75;
 
     private HeatTickHandler() {}
 
     public static void onLevelTick(LevelTickEvent.Post event) {
         if (!(event.getLevel() instanceof ServerLevel level)) {
-            // LevelTickEvent also fires on the logical client; never mutate temperature there.
             return;
         }
 
@@ -28,26 +26,38 @@ public final class HeatTickHandler {
                 BridgeConfig.REACTOR_RADIUS.get(), BridgeConfig.PIPE_RADIUS.get()));
             scanRadius = Math.max(1, Math.min(32, scanRadius));
 
-            // Discover existing blocks too; placement events alone miss sources that predate
-            // the mod startup or were already present when a chunk loaded.
             for (ServerPlayer player : level.players()) {
                 PositionCache.scanNear(level, player.blockPosition(), scanRadius);
             }
+
+            if (BridgeConfig.ENABLE_CONDENSATION.get()) {
+                // Only explicitly configured output blocks can condense fluid. This is not
+                // run by the per-player heat calculation, so multiple players won't multiply drains.
+                for (net.minecraft.core.BlockPos pipe : PositionCache.pipes(level)) {
+                    if (level.isLoaded(pipe)) {
+                        SteamFluidHelper.tryCondenseAtConfiguredOutput(level, pipe);
+                    }
+                }
+            }
         }
 
-        // Re-apply a bounded contribution after Cold Sweat's per-tick temperature updates.
-        // Both source types are aggregated into a single offset so they cannot compound
-        // by repeatedly adding their full configured values to Trait.WORLD.
         for (ServerPlayer player : level.players()) {
             double reactorHeat = ReactorHandler.heatForPlayer(level, player);
             double steamHeat = PipeHeatHandler.heatForPlayer(level, player);
-            double desiredHeat = Math.min(MAX_HEAT_OFFSET, Math.max(0.0, reactorHeat + steamHeat));
+            double configuredCap = BridgeConfig.MAX_TOTAL_HEAT.get();
+            double desiredHeat = Math.min(configuredCap, Math.max(0.0, reactorHeat + steamHeat));
             ColdSweatAdapter.applyWorldHeat(level, player, desiredHeat);
         }
 
         if (level.getGameTime() % 1200L == 0L) {
-            LOGGER.debug("Heat tick active in {}; reactorCandidates={}, pipeCandidates={}, players={}",
+            LOGGER.info("Текущая конфигурация нагрева в {}: reactorRadius={}, reactorHeat={}, pipeRadius={}, steamHeat={}, maxTotalHeat={}, updateInterval={}, reactorCandidates={}, pipeCandidates={}, players={}",
                 level.dimension().location(),
+                BridgeConfig.REACTOR_RADIUS.get(),
+                BridgeConfig.REACTOR_HEAT_MULTIPLIER.get(),
+                BridgeConfig.PIPE_RADIUS.get(),
+                BridgeConfig.STEAM_HEAT_MULTIPLIER.get(),
+                BridgeConfig.MAX_TOTAL_HEAT.get(),
+                interval,
                 PositionCache.reactors(level).size(),
                 PositionCache.pipes(level).size(),
                 level.players().size());
