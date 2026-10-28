@@ -48,6 +48,14 @@ public final class PositionCache {
         // Do not scan every block in a chunk or every loaded chunk on every tick.
     }
 
+    public static void registerReactor(ServerLevel level, BlockPos pos) {
+        reactors(level).add(pos.immutable());
+    }
+
+    public static void unregisterReactor(ServerLevel level, BlockPos pos) {
+        reactors(level).remove(pos.immutable());
+    }
+
     public static void update(ServerLevel level, BlockPos pos, BlockState state) {
         BlockPos key = pos.immutable();
         remove(level, key);

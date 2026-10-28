@@ -3,6 +3,7 @@ package com.yourname.myfirstmod.csgn.init;
 import com.yourname.myfirstmod.csgn.Csgn;
 import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredItem;
+import net.minecraft.world.item.BlockItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
@@ -17,7 +18,7 @@ public class ModItems {
             DeferredRegister.createItems(Csgn.MODID);
 
     // Предмет для блока-сердцевины реактора (ID: csgn:reactor_core)
-    public static final DeferredItem<Item> REACTOR_CORE_ITEM =
+    public static final DeferredItem<BlockItem> REACTOR_CORE_ITEM =
             ITEMS.registerSimpleBlockItem("reactor_core", ModBlocks.REACTOR_CORE);
 
     // =====================================================================================
