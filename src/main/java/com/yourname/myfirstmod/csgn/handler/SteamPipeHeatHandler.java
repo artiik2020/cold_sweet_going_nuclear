@@ -67,7 +67,6 @@ public final class SteamPipeHeatHandler {
     public void updatePipeZone(ServerLevel level, BlockPos pos) {
         if (!Config.steamPipeEffectsEnabled) return;
         if (!level.isLoaded(pos)) return;
-
         HeatZoneManager zones = HeatZoneManager.get(level);
         if (zones == null) return;
 
@@ -75,6 +74,11 @@ public final class SteamPipeHeatHandler {
             BlockState state = level.getBlockState(pos);
             double mult = (ModBlocks.isRadiator(state) && Config.radiatorDoublesHeat) ? 2.0 : 1.0;
             zones.addSteamPipeZone(pos, mult);
+
+            // TODO: Artem's Optional Task - [Медный радиатор конденсирует быстрее] (задача #5 в SAM.md)
+            // Подсказка: здесь ты сможешь поставить множитель для нового блока COPPER_RADIATOR,
+            // например: if (ModBlocks.isCopperRadiator(state)) mult *= 1.5;
+            // Пока метода isCopperRadiator() не существует — оставь как есть, всё работает.
         } else {
             zones.removeSteamPipeZone(pos);
         }

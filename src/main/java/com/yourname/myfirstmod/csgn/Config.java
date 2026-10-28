@@ -74,6 +74,18 @@ public class Config {
     public static final ModConfigSpec.IntValue MAX_TRACKED_SOURCES =
             B.comment("Максимум отслеживаемых источников тепла (защита от TPS-убийц)").defineInRange("perf.maxTrackedSources", 4096, 16, 65536);
 
+    // ===================== ОПЦИОНАЛЬНЫЕ ФИЧИ (заготовки для задач Артема) =====================
+    // ВНИМАНИЕ: эти значения по умолчанию ВЫКЛЮЧЕНЫ. Пока код в обработчиках не дописан,
+    // конфиг можно трогать смело — ничего не сломается. См. SAM.md, задачи #2 и #4.
+    public static final ModConfigSpec.DoubleValue HOT_PIPE_BURN_CHANCE =
+            B.comment("[Task #4] Шанс получить урон от ожога при касании трубы с паром, 0.0..1.0.",
+                      "По умолчанию 0.0 = фича выключена.")
+                    .defineInRange("gameplay.hotPipeBurnChance", 0.0, 0.0, 1.0);
+
+    public static final ModConfigSpec.BooleanValue STEAM_VISUALS_ENABLED =
+            B.comment("[Task #1/#2] Показывать ли частицы/звук пара вокруг горячих труб.")
+                    .define("visuals.steamEffectsEnabled", false);
+
     public static final ModConfigSpec SPEC = B.build();
 
     // ---- Кэшированные значения (читаются обработчиками каждый тик без обращения к SPEC) ----
@@ -95,6 +107,10 @@ public class Config {
     public static int heatApplyIntervalTicks = 10;
     public static int condenseIntervalTicks = 40;
     public static int maxTrackedSources = 4096;
+
+    // ---- Опциональные фичи: дефолты ВЫКЛЮЧЕНЫ, чтобы мода можно было не трогать ----
+    public static double hotPipeBurnChance = 0.0;   // Task #4 (0.0 = урона нет)
+    public static boolean steamVisualsEnabled = false; // Task #1/#2
 
     /** Валидатор строк конфига: пробуем распарсить как ResourceLocation. */
     private static boolean isValidId(Object obj) {
@@ -159,6 +175,10 @@ public class Config {
         condenseTurnsToWater      = CONDENSE_TURNS_TO_WATER.get();
         condenseAmountMb          = CONDENSE_AMOUNT_MB.get();
         radiatorDoublesHeat       = RADIATOR_DOUBLES_HEAT.get();
+
+        // Опциональные фичи (см. SAM.md). Дефолты в TOML выключены — ничего не меняешь, если не делаешь задачи.
+        hotPipeBurnChance         = HOT_PIPE_BURN_CHANCE.get();
+        steamVisualsEnabled       = STEAM_VISUALS_ENABLED.get();
     }
 
     private Config() {}

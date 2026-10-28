@@ -40,6 +40,23 @@ public class ModBlocks {
         return state.is(RADIATOR.get());
     }
 
+    // =====================================================================================
+    // TODO: Artem's Optional Task - [Медный радиатор] (задача #5 в SAM.md)
+    // Раскомментируй блок ниже, когда создашь класс CopperRadiatorBlock (он лежит заготовкой
+    // в block/CopperRadiatorBlock.java), добавь registerSimpleBlockItem() в ModItems и
+    // JSON-и (blockstates/models/lang). Всё компилируется и без этого — код ниже ЗАКОММЕНТИРОВАН.
+    //
+    // public static final DeferredBlock<CopperRadiatorBlock> COPPER_RADIATOR =
+    //         BLOCKS.register("copper_radiator",
+    //                 () -> new CopperRadiatorBlock(BlockBehaviour.Properties.of()
+    //                         .mapColor(MapColor.COLOR_ORANGE)
+    //                         .strength(4.0f)
+    //                         .sound(SoundType.COPPER)));
+    //
+    // public static boolean isCopperRadiator(net.minecraft.world.level.block.state.BlockState state) {
+    //     return state.is(COPPER_RADIATOR.get());
+    // }
+    // =====================================================================================
 
     //public static final DeferredRegister<Block> HOT_CASING =
     //       BLOCKS.register("hot_casing",

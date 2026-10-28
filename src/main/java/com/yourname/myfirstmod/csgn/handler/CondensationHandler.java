@@ -58,6 +58,31 @@ public final class CondensationHandler {
         }
     }
 
+    /**
+     * Заглушка для задачи #5 (см. SAM.md). Сейчас НЕ используется и всегда возвращает 1 —
+     * поведение мода НЕ меняется, даже если ты не будешь трогать эту задачу.
+     * Реализуй: проверяй через ModBlocks.isCopperRadiator(state) и возвращай 2.
+     */
+    @SuppressWarnings("unused")
+    private int copperMultiplier(ServerLevel level, BlockPos radiatorPos) {
+        // TODO: Artem's Optional Task - [Медный радиатор конденсирует быстрее] — наполни это тело,
+        // а затем ПРИМЕНИ результат в condenseInto(): переделай drainSteam(..., Config.condenseAmountMb, ...)
+        // на drainSteam(..., Config.condenseAmountMb * copperMultiplier(level, radiatorPos), ...).
+        //
+        // Логика по шагам:
+        //   1) BlockState state = level.getBlockState(radiatorPos);
+        //   2) if (ModBlocks.isCopperRadiator(state)) return 2;   // медь кондит в 2 раза жаднее
+        //   3) return 1;                                           // обычный радиатор / прочее
+        //
+        // ПОДВОДНЫЕ КАМНИ JAVA:
+        //  - метод обязан вернуть int на ВСЕХ ветках — компилятор не простит «провалившуюся»
+        //    if-без-return (в Python тут был бы None, в Java — ошибка compile);
+        //  - isCopperRadiator() появится только когда зарегистрируешь блок (задача #5, шаг 1).
+        //    Чтобы код компилировался СЕЙЧАС, оставь заглушку или сравни с существующим блоком:
+        //    if (state.is(ModBlocks.RADIATOR.get())) return 1;
+        return 1;
+    }
+
     /** Запрос capability FluidHandler для одной позиции. null — если блок не отдаёт жидкости. */
     private IFluidHandler fluidHandlerAt(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);

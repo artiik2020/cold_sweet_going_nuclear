@@ -52,5 +52,10 @@ public final class CsgnDebug {
 
         player.displayClientMessage(Component.literal(msg).withStyle(ChatFormatting.YELLOW), false);
         LOGGER.info("[CSGN][debug] {}", msg);
+
+        // TODO: Artem's Optional Task - [Команда /csgn heat вместо клика по блоку] (задача #6 в SAM.md)
+        // Клик по блоку неудобен, если не хочешь ломать чужие механизмы. Можно зарегистрировать
+        // настоящую команду: /csgn heat — и печатать ровно этот же текст оттуда.
+        // Где копирать: net.neoforged.neoforge.event.RegisterCommandsEvent + Commands.registerCommand().
     }
 }

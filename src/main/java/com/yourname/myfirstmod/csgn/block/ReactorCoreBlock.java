@@ -53,6 +53,12 @@ public class ReactorCoreBlock extends Block {
                     pos.getY() + 1.1,
                     pos.getZ() + 0.5 + (random.nextDouble() - 0.5) * 0.4,
                     0.0, 0.05, 0.0);
+
+            // TODO: Artem's Optional Task - [Мираж над горячим реактором] (задача #3 в SAM.md)
+            // Добавь КЛИЕНТСКИЕ частицы жара, например:
+            //   level.addParticle(ParticleTypes.SMALL_FLAME, ...координаты чуть ниже FLAME...);
+            // или свой ParticleOptions. ПОДВОДНЫЙ КАМЕНЬ: анимация вызывается на клиенте —
+            // не смей трогать серверные структуры данных (HeatZoneManager.get вернёт тут null).
         }
     }
 }

@@ -51,6 +51,38 @@ public final class HeatTickHandler {
 
             double deltaC = heat * DEG_PER_HEAT_PER_SECOND * secondsPerApply;
             ColdSweatBridge.addTemperature(living, deltaC);
+
+            // =================================================================================
+            // TODO: Artem's Optional Task - [Ожог от горячих труб/реакторов] (задача #4 в SAM.md)
+            // Раскомментируй строку ниже и реализуй метод applyBurnChance(...) в конце класса.
+            // Код ЗАКОММЕНТИРОВАН намеренно: мод компилируется и работает как раньше,
+            // пока ты сам не включишь фичу. Дефолт конфига hotPipeBurnChance = 0.0 — то есть
+            // даже после раскомментирования ничего не произойдёт, пока не поднимешь шанс в TOML.
+            // applyBurnChance(living, heat);
+            // =================================================================================
         }
+    }
+
+    /**
+     * Заглушка для опциональной задачи #4 (см. SAM.md).
+     * Пустой метод-скелет: с ним проект КОМПИЛИРУЕТСЯ, но ничего не делает.
+     * Твоя задача — наполнить тело (подсказки внутри).
+     */
+    private void applyBurnChance(LivingEntity entity, double heat) {
+        // TODO: Artem's Optional Task - [Ожог от горячих труб/реакторов] — наполни это тело.
+        //
+        // Логика по шагам:
+        //   1) if (Config.hotPipeBurnChance <= 0.0) return;          // фича выключена — выходим
+        //   2) брось монетку: RandomSource random = entity.level().random;
+        //      if (random.nextDouble() >= Config.hotPipeBurnChance) return;
+        //   3) нанеси полсердца урона:
+        //      entity.hurt(entity.level().damageSources().generic(), 1.0f);
+        //   4) (бонус) подсвети ожог частицами: см. задачу #1 про ParticleTypes.FLAME.
+        //
+        // ПОДВОДНЫЕ КАМНИ JAVA:
+        //  - entity.level() возвращает Level (общий класс), а damageSources()/hurt() есть у него —
+        //    но убедись, что ты НЕ на клиенте (этот хендлер уже серверный, всё ок);
+        //  - nextDouble() даёт [0.0, 1.0): сравнивай аккуратно (>= против >);
+        //  - hurt(EntityDamageSource, float) — второй параметр float, пиши ровно 1.0f, а не 1.0!
     }
 }
