@@ -4,70 +4,72 @@ import com.yourname.myfirstmod.csgn.Config;
 import com.yourname.myfirstmod.csgn.init.ModBlocks;
 import com.yourname.myfirstmod.csgn.integration.SteamFluidHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 /**
- * Конденсация пара: раз в Config.heatScanIntervalTicks тиков проверяем зоны труб
- * и «вытягиваем» (drain) пар у тех блоков, которые стоят рядом с нашим радиатором
- * (или под открытым небом — см. TODO). Выжатый пар превращается в воду согласно
- * конфигу CONDENSE_TURNS_TO_WATER.
+ * Конденсация пара: раз в Config.condenseIntervalTicks тиков проверяем ТОЛЬКО
+ * закэшированные позиции труб и «вытягиваем» (drain) пар у тех блоков, которые
+ * стыкуются с нашим радиатором (csgn:radiator). Выжатый пар превращается в воду
+ * согласно конфигу CONDENSE_TURNS_TO_WATER.
  *
  * Ключевой принцип NeoForge capabilities: сначала SIMULATE (безопасная проверка),
  * потом EXECUTE (реальное изменение). Никогда не мутируем чужой контейнер вслепую.
+ *
+ * ИСПРАВЛЕНО:
+ *  - НЕТ аннотации @EventBusSubscriber — регистрация вручную в конструкторе Csgn;
+ *  - server.getTickCount() -> level.getGameTime();
+ *  - событие привязано к уровню (LevelTickEvent.Post) — не перебираем все измерения сразу.
  */
-@EventBusSubscriber(modid = "csgn")
 public final class CondensationHandler {
 
     @SubscribeEvent
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public void onLevelTickPost(LevelTickEvent.Post event) {
         if (!Config.condensationEnabled) return;
-        int tick = event.getServer().getTickCount();
-        if (tick % Config.heatScanIntervalTicks != 0) return;
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
 
-        for (ServerLevel level : event.getServer().getAllLevels()) {
-            HeatZoneManager zones = HeatZoneManager.get(level);
-            if (zones == null || zones.pipeCount() == 0) continue;
+        // ИСПРАВЛЕНО: getTickCount() нет в 1.21.1 — используем level.getGameTime()
+        if (level.getGameTime() % Config.condenseIntervalTicks != 0) return;
 
-            // Копируем ключи, чтобы безопасно удалять из карты во время обхода
-            var pipePositions = new java.util.ArrayList<>(java.util.List.copyOf(zones.pipeSnapshotKeys()));
-            for (BlockPos pipePos : pipePositions) {
-                BlockEntityPipeContext ctx = inspect(level, pipePos);
-                if (ctx == null) continue;
+        HeatZoneManager zones = HeatZoneManager.get(level);
+        if (zones == null || zones.pipeCount() == 0) return;
 
-                // Пар конденсируем только если труба стыкуется с нашим РАДИАТОРОМ
-                // (детерминированное поведение — игрок сам выбирает место).
-                BlockPos radiatorPos = findAdjacentRadiator(level, pipePos);
-                if (radiatorPos == null) continue;
+        // Снимок ключей, чтобы безопасно удалять из карты во время обхода
+        for (BlockPos pipePos : zones.pipeSnapshotKeys()) {
+            // ИСПРАВЛЕНО: точечная проверка загрузки вместо скана чанков
+            if (!level.isLoaded(pipePos)) continue;
 
-                condenseInto(level, pipePos, radiatorPos);
-            }
+            // Пар конденсируем только если труба стыкуется с нашим РАДИАТОРОМ
+            // (детерминированное поведение — игрок сам выбирает место).
+            BlockPos radiatorPos = findAdjacentRadiator(level, pipePos);
+            if (radiatorPos == null) continue;
+
+            condenseInto(level, pipePos, radiatorPos);
         }
     }
 
-    /** Запрос capability трубы ещё раз — уже для дренажа. Возвращает handler или null. */
-    private static net.neoforged.neoforge.fluids.capability.IFluidHandler fluidHandlerAt(ServerLevel level, BlockPos pos) {
-        var state = level.getBlockState(pos);
-        var be = level.getBlockEntity(pos);
-        // getCapability возвращает null, если блок не экспортирует жидкости — это НЕ ошибка!
+    /** Запрос capability FluidHandler для одной позиции. null — если блок не отдаёт жидкости. */
+    private IFluidHandler fluidHandlerAt(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        BlockEntity be = state.hasBlockEntity() ? level.getBlockEntity(pos) : null;
         return level.getCapability(Capabilities.FluidHandler.BLOCK, pos, state, be, null);
     }
 
-    private record BlockEntityPipeContext(net.neoforged.neoforge.fluids.capability.IFluidHandler handler) {}
-
-    private static BlockEntityPipeContext inspect(ServerLevel level, BlockPos pos) {
-        var h = fluidHandlerAt(level, pos);
-        return h == null ? null : new BlockEntityPipeContext(h);
-    }
-
     /** Ищет блок-радиатор csgn прямо над/под/сбоку от трубы (6 сторон). */
-    private static BlockPos findAdjacentRadiator(ServerLevel level, BlockPos pipePos) {
-        for (var dir : net.minecraft.core.Direction.values()) {
+    private BlockPos findAdjacentRadiator(ServerLevel level, BlockPos pipePos) {
+        for (Direction dir : Direction.values()) {
             BlockPos neighbor = pipePos.relative(dir);
+            if (!level.isLoaded(neighbor)) continue;
             if (ModBlocks.isRadiator(level.getBlockState(neighbor))) {
                 return neighbor;
             }
@@ -75,39 +77,42 @@ public final class CondensationHandler {
         return null;
     }
 
-    /**
-     * Собственно конвертация: drainSteam(SIMULATE) -> drainSteam(EXECUTE) -> спавн воды.
-     */
-    private static void condenseInto(ServerLevel level, BlockPos pipePos, BlockPos radiatorPos) {
-        var handler = fluidHandlerAt(level, pipePos);
+    /** Собственно конвертация: drainSteam(SIMULATE) -> drainSteam(EXECUTE) -> вода. */
+    private void condenseInto(ServerLevel level, BlockPos pipePos, BlockPos radiatorPos) {
+        IFluidHandler handler = fluidHandlerAt(level, pipePos);
         if (handler == null) return;
 
         // 1) Симуляция: сколько реально пара труба готова отдать?
-        var simulated = SteamFluidHelper.drainSteam(handler, Config.condenseAmountMb, false);
+        FluidStack simulated = SteamFluidHelper.drainSteam(handler, Config.condenseAmountMb, false);
         if (simulated.isEmpty()) return;
 
         // =================================================================================
         // TODO: Artem's Task — условие «открытого конца»: добавь сюда проверку, что труба
         // смотрит открытым соединением в воздух (level.isEmptyBlock на стороне коннектора),
-        // и тогда тоже вызывай condenseInto. Подсказка: ищи Direction через
-        // be.getBlockState().getValue(...) — но у Create-труб это приватно, поэтому проще
-        // начать с варианта «рядом с радиатором», который уже работает.
+        // и тогда тоже конденсируй пар. Подсказка: у Create-труб приватные коннекторы,
+        // поэтому проще начать с работающего варианта «рядом с радиатором».
         // =================================================================================
 
         // 2) Execute: забираем пар из трубы НАВСЕГДА
-        var drained = SteamFluidHelper.drainSteam(handler, simulated.getAmount(), true);
+        FluidStack drained = SteamFluidHelper.drainSteam(handler, simulated.getAmount(), true);
         if (drained.isEmpty()) return;
 
         // 3) Куда деть воду?
         if (Config.condenseTurnsToWater) {
-            // Блок воздуха над радиатором -> вода. Если там что-то стоит — не ломаем мир.
-            BlockPos waterPos = radiatorPos.above();
-            if (level.isEmptyBlock(waterPos)) {
-                level.setBlockAndUpdate(waterPos, Blocks.WATER.defaultBlockState());
-            } else {
-                // Альтернатива: наполнитьtank радиатора... но у нас его нет — просто испаряем.
-                level.playSound(null, radiatorPos, net.minecraft.sounds.SoundEvents.LAVA_EXTINGUISH,
-                        net.minecraft.sounds.SoundSource.BLOCKS, 0.5f, 1.4f);
+            // Сначала пробуем залить воду обратно в тот же танк трубы (аккуратно, без луж):
+            FluidStack water = new FluidStack(net.minecraft.world.level.material.Fluids.WATER,
+                    drained.getAmount());
+            int filled = handler.fill(water, IFluidHandler.FluidAction.EXECUTE);
+            if (filled == 0) {
+                // Танк полон чем-то ещё или не принимает — ставим воду в воздух над радиатором,
+                // если там пусто; иначе просто звуковой эффект «шипения».
+                BlockPos waterPos = radiatorPos.above();
+                if (level.isEmptyBlock(waterPos)) {
+                    level.setBlockAndUpdate(waterPos, Blocks.WATER.defaultBlockState());
+                } else {
+                    level.playSound(null, radiatorPos, SoundEvents.LAVA_EXTINGUISH,
+                            SoundSource.BLOCKS, 0.5f, 1.4f);
+                }
             }
         }
         // В обоих случаях снимаем тепловую зону этой трубы до следующего скана:

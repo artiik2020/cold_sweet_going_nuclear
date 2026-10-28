@@ -4,89 +4,87 @@ import com.yourname.myfirstmod.csgn.Config;
 import com.yourname.myfirstmod.csgn.init.ModBlocks;
 import com.yourname.myfirstmod.csgn.integration.SteamFluidHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
-import it.unimi.dsi.fastutil.longs.LongIterator;
-import it.unimi.dsi.fastutil.longs.LongSet;
+import net.neoforged.neoforge.event.level.BlockEvent;
+import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 /**
- * Медленный трекер труб Create: раз в Config.heatScanIntervalTicks тиков
- * сканирует ЗАГРУЖЕННЫЕ чанки каждого измерения, запрашивает у блоков
- * Capability FluidHandler.BLOCK и если внутри пар — регистрирует тепловую зону.
- *
- * Почему capability, а не instanceof FluidPipeBlock? Потому что мы НЕ компилируемся
- * против Create: NeoForge сам отдаст IFluidHandler для любой трубы/танка/котла,
- * экспортирующего жидкости (Create регистрирует экспорт на RegisterCapabilitiesEvent).
- * Это стабильный публичный API загрузчика.
- *
- * Сканирование дорогое, поэтому:
- *  - берём только реально загруженные чанки (getChunkIfLoaded — БЕЗ генерации мира!);
- *  - сначала дешёвая проверка: у блока есть BlockEntity? (тubes BE have) — иначе skip;
- *  - полная пересборка раз в N тиков проще и надёжнее инкрементального учёта.
+ * Трекер труб Create с паром ЧЕРЕЗ КЭШ позиций (Set/Map в HeatZoneManager).
+ * ИСПРАВЛЕНИЯ 1.21.1:
+ *  - НЕТ getChunkSource().getLoadedChunks() / getChunkIfLoaded() — запрещён скан всех чанков;
+ *    трубы попадают в кэш через события установки/ломки, перепроверка идёт ТОЛЬКО
+ *    по закэшированным позициям с точечной проверкой level.isLoaded(pos);
+ *  - НЕТ аннотации @EventBusSubscriber — регистрация вручную в Csgn;
+ *  - Capability FluidHandler запрашивается точечно для одной позиции.
  */
-@EventBusSubscriber(modid = "csgn")
 public final class SteamPipeHeatHandler {
 
+    /** Трубу/FLUID PIPE поставили (или сосед изменился) — проверяем наличие пара. */
     @SubscribeEvent
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        BlockPos pos = event.getPos();
+        updatePipeZone(level, pos);
+        // Соседи могли получить/потерять соединение с сетью — обновляем их тоже.
+        for (Direction dir : Direction.values()) {
+            updatePipeZone(level, pos.relative(dir));
+        }
+    }
+
+    /** Трубу сломали — сразу снимаем её зону из кэша. */
+    @SubscribeEvent
+    public void onBlockBreak(BlockEvent.BreakEvent event) {
+        if (event.getLevel().isClientSide()) return;
+        HeatZoneManager zones = HeatZoneManager.get((ServerLevel) event.getLevel());
+        if (zones != null) zones.removeSteamPipeZone(event.getPos());
+    }
+
+    /** Раз в интервал перепроверяем ТОЛЬКО закэшированные позиции (без скана мира!). */
+    @SubscribeEvent
+    public void onLevelTick(LevelTickEvent.Post event) {
         if (!Config.steamPipeEffectsEnabled) return;
-        int tick = event.getServer().getTickCount();
-        if (tick % Config.heatScanIntervalTicks != 0) return;
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (level.getGameTime() % Config.condenseIntervalTicks != 0) return;
 
-        for (ServerLevel level : event.getServer().getAllLevels()) {
-            HeatZoneManager zones = HeatZoneManager.get(level);
-            if (zones == null) continue;
+        HeatZoneManager zones = HeatZoneManager.get(level);
+        if (zones == null) return;
 
-            zones.clearSteamPipeZones(); // полная пересборка карты зон труб
-
-            // Публичный API: список координат загруженных чанков как long-множество
-            // (upack: x в нижних 32 битах, z в верхних — распакует конструктор ChunkPos(long)).
-            LongSet loaded = level.getChunkSource().getLoadedChunks();
-
-            LongIterator it = loaded.longIterator();
-            while (it.hasNext() && zones.pipeCount() < Config.maxTrackedSources) {
-                ChunkPos chunkPos = new ChunkPos(it.nextLong());
-                if (level.getChunkIfLoaded(chunkPos) == null) continue; // страховка
-                scanChunk(level, chunkPos, zones);
+        for (BlockPos pos : zones.pipeSnapshotKeys()) {
+            // ИСПРАВЛЕНО: level.isLoaded(pos) вместо обращения к незагруженным чанкам
+            if (!level.isLoaded(pos)) continue;
+            if (!checkHasSteam(level, pos)) {
+                zones.removeSteamPipeZone(pos); // пар ушёл из трубы — снимаем зону
             }
         }
     }
 
-    /** Сканирование одного чанка: каждый блок -> попытка получить fluid capability. */
-    private static void scanChunk(ServerLevel level, ChunkPos chunkPos, HeatZoneManager zones) {
-        int minX = chunkPos.getMinBlockX(), minZ = chunkPos.getMinBlockZ();
-        int minY = level.getMinBuildHeight(), maxY = level.getMaxBuildHeight();
+    /** Capability-проверка ОДНОЙ позиции + добавление/снятие зоны в кэше. */
+    public void updatePipeZone(ServerLevel level, BlockPos pos) {
+        if (!Config.steamPipeEffectsEnabled) return;
+        if (!level.isLoaded(pos)) return;
 
-        for (int x = minX; x < minX + 16; x++) {
-            for (int z = minZ; z < minZ + 16; z++) {
-                for (int y = minY; y < maxY; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
+        HeatZoneManager zones = HeatZoneManager.get(level);
+        if (zones == null) return;
 
-                    // Дешёвый фильтр: трубы Create всегда имеют BlockEntity.
-                    BlockEntity be = level.getBlockEntity(pos);
-                    if (be == null) continue;
-
-                    var state = be.getBlockState();
-
-                    // Аккуратный запрос capability: null означает «блок не отдаёт жидкости» —
-                    // это НОРМАЛЬНАЯ ситуация, а не ошибка (никаких ClassCastException!).
-                    var handler = level.getCapability(Capabilities.FluidHandler.BLOCK, pos, state, be, null);
-                    if (handler == null) continue;
-
-                    if (SteamFluidHelper.containsSteam(handler)) {
-                        // Наш радиатор греет сильнее обычной трубы:
-                        double mult = ModBlocks.isRadiator(state) && Config.radiatorDoublesHeat ? 2.0 : 1.0;
-                        zones.addSteamPipeZone(pos, mult);
-                    }
-                }
-            }
+        if (checkHasSteam(level, pos)) {
+            BlockState state = level.getBlockState(pos);
+            double mult = (ModBlocks.isRadiator(state) && Config.radiatorDoublesHeat) ? 2.0 : 1.0;
+            zones.addSteamPipeZone(pos, mult);
+        } else {
+            zones.removeSteamPipeZone(pos);
         }
     }
 
-    private SteamPipeHeatHandler() {}
+    /** Дёргаем FluidHandler capability ТОЛЬКО для конкретной позиции. */
+    private boolean checkHasSteam(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        BlockEntity be = state.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+        var handler = level.getCapability(Capabilities.FluidHandler.BLOCK, pos, state, be, null);
+        return SteamFluidHelper.containsSteam(handler);
+    }
 }

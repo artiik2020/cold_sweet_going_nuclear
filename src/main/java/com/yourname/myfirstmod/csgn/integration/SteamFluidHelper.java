@@ -1,75 +1,76 @@
 package com.yourname.myfirstmod.csgn.integration;
 
 import com.yourname.myfirstmod.csgn.Config;
-import net.neoforged.neoforge.fluids.FluidType;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Работа с Create-трубами ЧИСТО через стандартную NeoForge Capability
- * (net.neoforged.neoforge.capabilities.BlockCapability + IFluidHandler) —
- * без импорта классов Create. Create сам экспортирует FluidHandler.BLOCK
- * для своих труб/танков/котлов, поэтому нам хватает интерфейса.
+ * Помощник по работе с паром через IFluidHandler (Capability FluidHandler BLOCK).
+ * ИСПРАВЛЕНИЯ Fluid API 1.21.1:
+ *  - У FluidType НЕТ getRegistryName() — ID жидкости получаем через
+ *    BuiltInRegistries.FLUID.getKey(stack.getFluid());
+ *  - Конструктор FluidStack принимает Holder&lt;Fluid&gt; или Fluid, НО НЕ FluidType:
+ *    new FluidStack(stack.getFluidHolder(), amount) / new FluidStack(fluid, amount).
  */
 public final class SteamFluidHelper {
 
-    /** Сколько mB пара должно быть во «вторичном» баке трубы, чтобы считать её «горячей». */
     private static final int MIN_STEAM_MB = 1;
 
-    /**
-     * Есть ли в обработчике жидкость-пар (create:steam по whitelist конфига)?
-     * @param handler capability трубы, может быть null — обрабатываем безопасно
-     */
+    /** Есть ли в обработчике жидкость из whitelist «пара»? */
     public static boolean containsSteam(@Nullable IFluidHandler handler) {
         if (handler == null) return false;
         try {
-            // У Fluid Pipe Create бак обычно двухслотовый: PRIMARY (содержимое сети)
-            // и SECONDARY (то, что видно снаружи). Проверяем оба.
-            for (int tank = 0; tank < Math.min(handler.getTanks(), 2); tank++) {
-                var stack = handler.getFluidInTank(tank);
-                if (!stack.isEmpty()
-                        && stack.getAmount() >= MIN_STEAM_MB
-                        && Config.isSteamFluid(stack.getFluidType().getRegistryName())) {
-                    return true;
-                }
+            for (int tank = 0; tank < handler.getTanks(); tank++) {
+                FluidStack stack = handler.getFluidInTank(tank);
+                if (stack.isEmpty() || stack.getAmount() < MIN_STEAM_MB) continue;
+                // ИСПРАВЛЕНО: registry name жидкости через BuiltInRegistries, а не FluidType
+                ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(stack.getFluid());
+                if (Config.isSteamFluid(fluidId)) return true;
             }
-        } catch (RuntimeException e) {
-            // Страховка: чужой handler повёлся странно — не крашим тик мира.
-            return false;
+        } catch (RuntimeException ignored) {
+            // чужой handler мог кинуть исключение — считаем, что пара нет
         }
         return false;
     }
 
     /**
-     * Пытается вытянуть (drain) до amountMb пара из трубы.
-     * @return реально извлечённый FluidStack или EMPTY, если пара нет/не дали.
+     * Пытается вытянуть до amountMb пара из первого подходящего танка.
+     * Сначала SIMULATE (не меняем мир), при execute=true — EXECUTE.
      */
-    public static net.neoforged.neoforge.fluids.FluidStack drainSteam(
-            @Nullable IFluidHandler handler, int amountMb, boolean execute) {
-        if (handler == null) return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+    public static FluidStack drainSteam(@Nullable IFluidHandler handler, int amountMb, boolean execute) {
+        if (handler == null) return FluidStack.EMPTY;
         try {
             for (int tank = 0; tank < handler.getTanks(); tank++) {
-                var content = handler.getFluidInTank(tank);
+                FluidStack content = handler.getFluidInTank(tank);
                 if (content.isEmpty()) continue;
-                FluidType type = content.getFluidType();
-                var id = type.getRegistryName();
-                if (id == null || !Config.isSteamFluid(id)) continue;
 
-                // Сначала симуляция (execute=false) — узнаём, сколько реально отдадут:
-                var simulated = handler.drain(new net.neoforged.neoforge.fluids.FluidStack(type, amountMb),
-                        IFluidHandler.FluidAction.SIMULATE);
+                ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(content.getFluid());
+                if (!Config.isSteamFluid(fluidId)) continue;
+
+                // ИСПРАВЛЕНО: FluidStack конструируется от Fluid (или Holder<Fluid>), НЕ от FluidType
+                FluidStack request = new FluidStack(content.getFluidHolder(), amountMb);
+
+                FluidStack simulated = handler.drain(request, IFluidHandler.FluidAction.SIMULATE);
                 if (simulated.isEmpty()) continue;
 
                 if (execute) {
-                    return handler.drain(new net.neoforged.neoforge.fluids.FluidStack(type, simulated.getAmount()),
+                    return handler.drain(
+                            new FluidStack(simulated.getFluidHolder(), simulated.getAmount()),
                             IFluidHandler.FluidAction.EXECUTE);
                 }
                 return simulated;
             }
         } catch (RuntimeException ignored) {
-            // безопасный отказ
         }
-        return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+        return FluidStack.EMPTY;
+    }
+
+    /** Registry ID жидкости стека (для логов/сравнений). */
+    public static ResourceLocation fluidId(FluidStack stack) {
+        return BuiltInRegistries.FLUID.getKey(stack.getFluid());
     }
 
     private SteamFluidHelper() {}

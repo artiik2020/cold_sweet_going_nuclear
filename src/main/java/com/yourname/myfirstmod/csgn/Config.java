@@ -1,8 +1,6 @@
 package com.yourname.myfirstmod.csgn;
 
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
@@ -11,16 +9,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Конфигурация мода-бриджа (NeoForge ModConfigSpec).
- * Файл создаётся автоматически после первого запуска: run/config/csgn-common.toml
- *
- * Как это работает:
- *  - ModConfigSpec.Builder описывает «схему» конфига (ключ, тип, значение по умолчанию);
- *  - SPEC передаётся в modContainer.registerConfig(...) в главном классе мода;
- *  - при загрузке/перезагрузке конфига (ModConfigEvent) значения копируются
- *    в простые статические поля — читать их каждый тик через .get() медленно.
+ * Конфигурация мода-бриджа (ModConfigSpec).
+ * ВАЖНО: аннотация @EventBusSubscriber(bus = Bus.MOD) УДАЛЕНА — слушатели конфиг-событий
+ * регистрируются вручную через modEventBus.addListener(...) в конструкторе Csgn.
  */
-@EventBusSubscriber(modid = Csgn.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class Config {
 
     private static final ModConfigSpec.Builder B = new ModConfigSpec.Builder();
@@ -33,17 +25,13 @@ public class Config {
             B.comment("Радиус тепловой зоны реактора, в блоках").defineInRange("reactor.heatRadius", 100, 1, 512);
 
     public static final ModConfigSpec.DoubleValue REACTOR_HEAT_MULTIPLIER =
-            B.comment("Множитель тепла: сколько «единиц нагрева» получает зона в центре реактора.",
-                      "Значение плавно убывает до нуля на краю радиуса.").defineInRange("reactor.heatMultiplier", 4.0, 0.0, 100.0);
+            B.comment("Множитель тепла в центре зоны реактора (убывает линейно к краю)").defineInRange("reactor.heatMultiplier", 4.0, 0.0, 100.0);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> REACTOR_BLOCK_WHITELIST =
-            B.comment("Список ID блоков, которые считаются реакторами.",
-                      "Так бридж определяет реакторы Going Nuclear БЕЗ компиляции против его API:",
-                      "просто добавь сюда ID блока из мода (например 'goingnuclear:fission_reactor_core').",
-                      "Наш тестовый блок csgn:reactor_core уже включён.")
+            B.comment("ID блоков, считаемых реакторами.")
                     .defineListAllowEmpty("reactor.blockWhitelist",
                             List.of("csgn:reactor_core"),
-                            obj -> obj instanceof String s && ResourceLocation.isValidPath(s));
+                            Config::isValidId);
 
     // ====================== ТРУБЫ СО ПАРОМ (Create FluidHandler Capability) ======================
     public static final ModConfigSpec.BooleanValue STEAM_PIPE_EFFECTS_ENABLED =
@@ -56,68 +44,73 @@ public class Config {
             B.comment("Множитель тепла от одной трубы с паром").defineInRange("pipes.steamHeatMultiplier", 1.5, 0.0, 100.0);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> STEAM_FLUID_IDS =
-            B.comment("ID жидкостей, считаемых «горячим паром». Совпадение с НАЧАЛОМ строки тоже подходит,",
-                      "так что 'create:steam' поймает и 'create:steam', и будущие варианты типа 'create:steam_hot'.")
+            B.comment("ID жидкостей, считаемых «горячим паром» (сравнение с НАЧАЛА строки).")
                     .defineListAllowEmpty("pipes.steamFluidIds", List.of("create:steam"),
-                            obj -> obj instanceof String s && ResourceLocation.isValidPath(s));
+                            Config::isValidId);
 
     // ================================ КОНДЕНСАЦИЯ ПАРА ================================
     public static final ModConfigSpec.BooleanValue CONDENSATION_ENABLED =
             B.comment("Включена ли конденсация пара в воду").define("condensation.enabled", true);
 
     public static final ModConfigSpec.BooleanValue CONDENSE_TURNS_TO_WATER =
-            B.comment("true:  слитый пар заменяется водой в мире (setBlockAndUpdate WATER)",
-                      "false: пар просто сливается (drain) из трубы и исчезает — тепловая зона снимается")
+            B.comment("true: вместо пара в трубу загоняется вода; false: пар просто drain'ится")
                     .define("condensation.turnIntoWater", true);
 
     public static final ModConfigSpec.IntValue CONDENSE_AMOUNT_MB =
-            B.comment("Сколько миллибукетов (mB) пара конденсируется за одну операцию",
-                      "1000 mB = 1 ведро = целый блок воды").defineInRange("condensation.amountPerTick", 1000, 1, 16_000);
+            B.comment("mB пара за одну операцию конденсации (1000 mB = 1 ведро)").defineInRange("condensation.amountPerTick", 1000, 1, 16_000);
 
     public static final ModConfigSpec.BooleanValue RADIATOR_DOUBLES_HEAT =
-            B.comment("Даёт ли наш блок-радиатор двойной множитель тепла во время конденсации").define("condensation.radiatorDoublesHeat", true);
+            B.comment("Даёт ли блок-радиатор двойной множитель тепла").define("condensation.radiatorDoublesHeat", true);
 
     // =============================== ПРОИЗВОДИТЕЛЬНОСТЬ ===============================
-    public static final ModConfigSpec.IntValue HEAT_SCAN_INTERVAL_TICKS =
-            B.comment("Как часто (в тиках) сканировать загруженные чанки на трубы с паром. 20 тиков = 1 секунда.",
-                      "Увеличь при лагах на больших серверах.").defineInRange("perf.scanIntervalTicks", 20, 1, 200);
-
     public static final ModConfigSpec.IntValue HEAT_APPLY_INTERVAL_TICKS =
-            B.comment("Как часто применять тепло к игрокам/мебам (в тиках)")
-                    .defineInRange("perf.applyIntervalTicks", 10, 1, 200);
+            B.comment("Как часто (в тиках) применять тепло к игрокам/мебам").defineInRange("perf.applyIntervalTicks", 10, 1, 200);
+
+    public static final ModConfigSpec.IntValue CONDENSE_INTERVAL_TICKS =
+            B.comment("Как часто (в тиках) пытаться конденсировать пар у радиаторов").defineInRange("perf.condenseIntervalTicks", 40, 5, 1000);
 
     public static final ModConfigSpec.IntValue MAX_TRACKED_SOURCES =
-            B.comment("Максимум одновременно отслеживаемых источников тепла (защита от TPS-убийц)")
-                    .defineInRange("perf.maxTrackedSources", 4096, 16, 65536);
+            B.comment("Максимум отслеживаемых источников тепла (защита от TPS-убийц)").defineInRange("perf.maxTrackedSources", 4096, 16, 65536);
 
-    static final ModConfigSpec SPEC = B.build();
+    public static final ModConfigSpec SPEC = B.build();
 
-    // ---- Кэшированные значения (читаются обработчиками каждый тик) ----
-    public static boolean reactorEffectsEnabled;
-    public static int reactorHeatRadius;
-    public static double reactorHeatMultiplier;
-    public static Set<ResourceLocation> reactorBlockWhitelist = Set.of();
+    // ---- Кэшированные значения (читаются обработчиками каждый тик без обращения к SPEC) ----
+    public static boolean reactorEffectsEnabled = true;
+    public static int reactorHeatRadius = 100;
+    public static double reactorHeatMultiplier = 4.0;
+    public static Set<ResourceLocation> reactorBlockWhitelist = Set.of(ResourceLocation.parse("csgn:reactor_core"));
 
-    public static boolean steamPipeEffectsEnabled;
-    public static int steamPipeHeatRadius;
-    public static double steamPipeHeatMultiplier;
-    public static List<String> steamFluidPrefixes = List.of();
+    public static boolean steamPipeEffectsEnabled = true;
+    public static int steamPipeHeatRadius = 5;
+    public static double steamPipeHeatMultiplier = 1.5;
+    public static List<String> steamFluidPrefixes = List.of("create:steam");
 
-    public static boolean condensationEnabled;
-    public static boolean condenseTurnsToWater;
-    public static int condenseAmountMb;
-    public static boolean radiatorDoublesHeat;
+    public static boolean condensationEnabled = true;
+    public static boolean condenseTurnsToWater = true;
+    public static int condenseAmountMb = 1000;
+    public static boolean radiatorDoublesHeat = true;
 
-    public static int heatScanIntervalTicks;
-    public static int heatApplyIntervalTicks;
-    public static int maxTrackedSources;
+    public static int heatApplyIntervalTicks = 10;
+    public static int condenseIntervalTicks = 40;
+    public static int maxTrackedSources = 4096;
 
-    /** Является ли блок с таким ID реактором по whitelist из конфига. */
+    /** Валидатор строк конфига: пробуем распарсить как ResourceLocation. */
+    private static boolean isValidId(Object obj) {
+        if (!(obj instanceof String s)) return false;
+        try {
+            ResourceLocation.parse(s);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Является ли блок с таким ID реактором по whitelist. */
     public static boolean isReactorBlock(ResourceLocation blockId) {
         return reactorBlockWhitelist.contains(blockId);
     }
 
-    /** Считается ли данная жидкость «паром» по префиксам из конфига. */
+    /** Считается ли жидкость с таким ID «паром» по префиксам конфига. */
     public static boolean isSteamFluid(ResourceLocation fluidId) {
         String id = fluidId.toString();
         for (String prefix : steamFluidPrefixes) {
@@ -126,11 +119,14 @@ public class Config {
         return false;
     }
 
-    @SubscribeEvent
-    static void onLoad(final ModConfigEvent.Loading event) { refresh(); }
+    // ==== Обработчики конфиг-событий. РЕГИСТРИРУЮТСЯ ВРУЧНУЮ в конструкторе Csgn ====
+    public static void onConfigLoad(ModConfigEvent.Loading event) {
+        if (event.getConfig().getSpec() == SPEC) refresh();
+    }
 
-    @SubscribeEvent
-    static void onReload(final ModConfigEvent.Reloading event) { refresh(); }
+    public static void onConfigReload(ModConfigEvent.Reloading event) {
+        if (event.getConfig().getSpec() == SPEC) refresh();
+    }
 
     private static void refresh() {
         reactorEffectsEnabled     = REACTOR_EFFECTS_ENABLED.get();
@@ -149,8 +145,10 @@ public class Config {
         condenseAmountMb          = CONDENSE_AMOUNT_MB.get();
         radiatorDoublesHeat       = RADIATOR_DOUBLES_HEAT.get();
 
-        heatScanIntervalTicks     = HEAT_SCAN_INTERVAL_TICKS.get();
         heatApplyIntervalTicks    = HEAT_APPLY_INTERVAL_TICKS.get();
+        condenseIntervalTicks     = CONDENSE_INTERVAL_TICKS.get();
         maxTrackedSources         = MAX_TRACKED_SOURCES.get();
     }
+
+    private Config() {}
 }

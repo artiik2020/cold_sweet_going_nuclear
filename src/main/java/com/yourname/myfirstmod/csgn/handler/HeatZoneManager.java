@@ -3,7 +3,6 @@ package com.yourname.myfirstmod.csgn.handler;
 import com.yourname.myfirstmod.csgn.Config;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.attachment.AttachmentType;
 import org.jspecify.annotations.Nullable;
 
 import java.util.HashMap;
@@ -11,22 +10,23 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Ядро бриджа: хранилище всех тепловых ЗОН конкретного уровня (мира).
+ * Ядро бриджа: хранилище всех тепловых ЗОН конкретного ServerLevel.
+ * Привязан к уровню через NeoForge Data Attachment (см. ModAttachments),
+ * поэтому несколько измерений работают независимо и данные живут между тиками.
  *
- * Архитектура:
- *  - Один экземпляр на Level (ServerLevel): привязан через NeoForge Data Attachment,
- *    поэтому несколько измерений работают независимо.
+ * ОПТИМИЗАЦИЯ (главное правило мода): НИКАКОГО сканирования загруженных чанков.
  *  - Реакторы добавляются БЫСТРЫМ путём: onPlace/onRemove блока -> add/remove — O(1).
- *  - Трубы добавляются МЕДЛЕННЫМ путём: SteamPipeHeatHandler раз в N тиков
- *    пересобирает карту зон труб сканированием загруженных чанков.
+ *  - Трубы попадают в кэш через события установки/ломки + редкую перепроверку
+ *    ТОЛЬКО закэшированных позиций (SteamPipeHeatHandler).
  *
  * Всё происходит на игровом потоке (server tick), поэтому обычный HashMap безопасен.
  */
 public class HeatZoneManager {
 
-    /** Тип attachment'а. Регистрация — в ModAttachments.init(). */
-    public static final AttachmentType<HeatZoneManager> ATTACHMENT =
-            AttachmentType.builder(HeatZoneManager::new).build();
+    /** Фабрика для AttachmentType.builder(...) — создаётся ВНУТРИ регистрации в ModAttachments. */
+    public static HeatZoneManager create() {
+        return new HeatZoneManager();
+    }
 
     /** pos реактора -> множитель интенсивности (1.0 обычно) */
     private final Map<BlockPos, Double> reactorZones = new HashMap<>();
@@ -38,7 +38,7 @@ public class HeatZoneManager {
     @Nullable
     public static HeatZoneManager get(@Nullable Level level) {
         if (level == null || level.isClientSide()) return null;
-        return level.getData(ATTACHMENT);
+        return level.getData(com.yourname.myfirstmod.csgn.init.ModAttachments.HEAT_ZONE_MANAGER.get());
     }
 
     // ============================ ИЗМЕНЕНИЕ ЗОН ============================
@@ -61,11 +61,11 @@ public class HeatZoneManager {
 
     public void removeSteamPipeZone(BlockPos pos) { steamPipeZones.remove(pos); }
 
-    /** Снимок ключей зон труб (для безопасного обхода в CondensationHandler). */
+    /** Снимок ключей труб — безопасно обходить и удалять из карты во время цикла. */
     public Set<BlockPos> pipeSnapshotKeys() { return Set.copyOf(steamPipeZones.keySet()); }
 
-    /** Полный сброс зон труб — вызывается перед пересканированием. */
-    public void clearSteamPipeZones() { steamPipeZones.clear(); }
+    /** Снимок ключей реакторов. */
+    public Set<BlockPos> reactorSnapshotKeys() { return Set.copyOf(reactorZones.keySet()); }
 
     public void clearAll() { reactorZones.clear(); steamPipeZones.clear(); }
 
@@ -77,19 +77,19 @@ public class HeatZoneManager {
     // ============================ ВЫЧИСЛЕНИЕ ТЕПЛА ============================
 
     /**
-     * Суммарный «нагрев» в точке pos — главная формула мода.
-     * Модель: линейное затухание от центра зоны к её краю:
-     *   heat(pos) = Σ  multiplier_i * M_i * (1 - dist_i / radius_i)
-     * Именно это число ColdSweatBridge превращает в градусы для игроков/мобов.
+     * Суммарный «нагрев» в точке: heat = Σ mult_i * M_i * (1 - dist_i / radius_i).
+     * Тепло линейно убывает от центра зоны к её краю.
+     * ИСПРАВЛЕНО: никаких AABB — сравнение по квадрату расстояния (distSqr).
      */
     public double heatAt(BlockPos pos) {
         double heat = 0.0;
 
         if (Config.reactorEffectsEnabled) {
             double rr = Config.reactorHeatRadius;
+            double rrSq = rr * rr;
             for (Map.Entry<BlockPos, Double> e : reactorZones.entrySet()) {
                 double dSq = e.getKey().distSqr(pos);
-                if (dSq <= rr * rr) {                       // сравнение квадратов — без Math.sqrt!
+                if (dSq <= rrSq) {
                     heat += e.getValue() * Config.reactorHeatMultiplier * (1.0 - Math.sqrt(dSq) / rr);
                 }
             }
@@ -97,9 +97,10 @@ public class HeatZoneManager {
 
         if (Config.steamPipeEffectsEnabled) {
             double pr = Config.steamPipeHeatRadius;
+            double prSq = pr * pr;
             for (Map.Entry<BlockPos, Double> e : steamPipeZones.entrySet()) {
                 double dSq = e.getKey().distSqr(pos);
-                if (dSq <= pr * pr) {
+                if (dSq <= prSq) {
                     heat += e.getValue() * Config.steamPipeHeatMultiplier * (1.0 - Math.sqrt(dSq) / pr);
                 }
             }
@@ -107,9 +108,11 @@ public class HeatZoneManager {
         return heat;
     }
 
-    /** Есть ли вообще активные источники (для раннего выхода в тикере). */
+    /** Есть ли вообще активные источники тепла (для раннего выхода в тик-хендлере)? */
     public boolean hasAnySource() {
         return (!reactorZones.isEmpty() && Config.reactorEffectsEnabled)
                 || (!steamPipeZones.isEmpty() && Config.steamPipeEffectsEnabled);
     }
+
+    private HeatZoneManager() {}
 }
