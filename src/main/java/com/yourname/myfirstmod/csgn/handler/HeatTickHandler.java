@@ -4,14 +4,9 @@ import com.yourname.myfirstmod.csgn.Config;
 import com.yourname.myfirstmod.csgn.integration.ColdSweatBridge;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypeTest;
 import net.minecraft.world.entity.LivingEntity;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * «Сердце» бриджа: применяет накопленное тепло зон к LivingEntity через ColdSweatBridge.
@@ -20,30 +15,18 @@ import java.util.List;
  *  - нет скана чанков и глобального AABB — перебираются только сущности уровня,
  *    а тепло считается по кэшу зон (HeatZoneManager);
  *  - таймер на level.getGameTime();
- *  - level.getEntities() без параметров возвращает LevelEntityGetter<Entity>,
- *    который НЕ является Iterable/array — для for-each не годится. Используем
- *    перегрузку ServerLevel.getEntities(EntityTypeTest, List) — она наполняет
- *    переданный список живыми сущностями и возвращает его же.
+ *  - level.getEntities() БЕЗ параметров возвращает LevelEntityGetter<Entity>,
+ *    который НЕ является Iterable — для for-each не годится. Правильный способ
+ *    получить ВСЕХ сущностей серверного уровня одной коллекцией —
+ *    level.getEntities().getAll() (вернёт java.lang.Iterable<Entity>).
+ *  - Никаких self-made EntityTypeTest-классов: EntityTypeTest ванильного MC —
+ *    это interface с static-фабриками (forType/forClass), его нельзя создать
+ *    как "new EntityTypeTest<>() {}" c методом getBaseType() — такого метода нет.
  */
 public final class HeatTickHandler {
 
     /** Сколько °C/сек даёт 1 единица «накала» зоны. */
     private static final double DEG_PER_HEAT_PER_SECOND = 0.5;
-
-    /** Фильтр сущностей: пропускаем только LivingEntity (игроки, мобы, животные). */
-    private static final EntityTypeTest<Entity, LivingEntity> LIVING_FILTER =
-            new EntityTypeTest<>() {
-                @Override
-                public LivingEntity tryCast(Entity entity) {
-                    return entity instanceof LivingEntity living ? living : null;
-                }
-
-                @Override
-                public EntityType<?> getBaseType() {
-                    // Базовый тип не важен: tryCast фильтрует всех живых существ.
-                    return EntityType.PLAYER;
-                }
-            };
 
     @SubscribeEvent
     public void onLevelTickPost(LevelTickEvent.Post event) {
@@ -58,11 +41,10 @@ public final class HeatTickHandler {
 
         double secondsPerApply = Config.heatApplyIntervalTicks / 20.0;
 
-        // Собираем всех живых сущностей уровня в список (перегрузка getEntities(test, list))
-        List<LivingEntity> targets = new ArrayList<>();
-        level.getEntities(LIVING_FILTER, targets);
+        // getAll() — единственный Iterable-метод LevelEntityGetter в 1.21.1
+        for (Entity entity : level.getEntities().getAll()) {
+            if (!(entity instanceof LivingEntity living)) continue;
 
-        for (LivingEntity living : targets) {
             double heat = zones.heatAt(living.blockPosition());
             if (heat <= 0.0) continue;
 
