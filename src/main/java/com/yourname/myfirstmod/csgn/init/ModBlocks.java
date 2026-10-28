@@ -24,9 +24,8 @@ public class ModBlocks {
             BLOCKS.register("reactor_core",
                     () -> new ReactorCoreBlock(BlockBehaviour.Properties.of()
                             .mapColor(MapColor.COLOR_ORANGE)
-                            .strength(50.0f, 1200.0f)
-                            .sound(SoundType.METAL)
-                            .requiresTool()));
+                            .strength(5000000.0f, 1200.0f)
+                            .sound(SoundType.METAL)));
 
     /** Радиатор: ставится рядом с трубой Create — пар гарантированно конденсируется в нём. */
     public static final DeferredBlock<RadiatorBlock> RADIATOR =
@@ -41,6 +40,11 @@ public class ModBlocks {
         return state.is(RADIATOR.get());
     }
 
+
+    //public static final DeferredRegister<Block> HOT_CASING =
+    //       BLOCKS.register("hot_casing",
+    //               () -> new Block(BlockBehaviour.Properties.of()
+    //                       .mapColor(MapColor.METAL).strength(3.0f)));
     // =====================================================================================
     // TODO: Artem's Task — Зарегистрируй здесь свой блок! Например «горячий корпус»:
     //

@@ -43,7 +43,7 @@ public class Config {
                       "Наш тестовый блок csgn:reactor_core уже включён.")
                     .defineListAllowEmpty("reactor.blockWhitelist",
                             List.of("csgn:reactor_core"),
-                            obj -> obj instanceof String s && ResourceLocation.isValid(s));
+                            obj -> obj instanceof String s && ResourceLocation.isValidPath(s));
 
     // ====================== ТРУБЫ СО ПАРОМ (Create FluidHandler Capability) ======================
     public static final ModConfigSpec.BooleanValue STEAM_PIPE_EFFECTS_ENABLED =
@@ -59,7 +59,7 @@ public class Config {
             B.comment("ID жидкостей, считаемых «горячим паром». Совпадение с НАЧАЛОМ строки тоже подходит,",
                       "так что 'create:steam' поймает и 'create:steam', и будущие варианты типа 'create:steam_hot'.")
                     .defineListAllowEmpty("pipes.steamFluidIds", List.of("create:steam"),
-                            obj -> obj instanceof String s && ResourceLocation.isValid(s));
+                            obj -> obj instanceof String s && ResourceLocation.isValidPath(s));
 
     // ================================ КОНДЕНСАЦИЯ ПАРА ================================
     public static final ModConfigSpec.BooleanValue CONDENSATION_ENABLED =

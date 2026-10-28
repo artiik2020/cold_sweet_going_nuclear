@@ -45,19 +45,13 @@ public class ReactorCoreBlock extends Block {
     }
 
     /** Вызывается каждый тик для блоков рядом с игроком — место для частиц/звуков. */
-    @Override
     public void animateTick(BlockState state, Level level, BlockPos pos,
-                            net.minecraft.RandomSources randomSources, long gameTime) {
-        super.animateTick(state, level, pos, randomSources, gameTime);
+                            net.minecraft.util.RandomSource randomSource) {
+        super.animateTick(state, level, pos, randomSource);
 
-        // =================================================================================
-        // TODO: Artem's Task — Добавь эффект жара над «реактором»:
-        //
-        // if (level.isClientSide() && gameTime % 8 == 0) {
-        //     level.addParticle(net.minecraft.core.particles.ParticleTypes.FLAME,
-        //             pos.getX() + 0.5, pos.getY() + 1.1, pos.getZ() + 0.5,
-        //             0.0, 0.05, 0.0);
-        // }
-        // =================================================================================
+        if  (!level.isClientSide() && gameTime % 8 == 0) {
+            level.addParticle(net.minecraft.core.particles.ParticleType.FLAME,
+                    pos.getX() + 0.5, pos.getY() + 1.1, pos.getZ() + 0.5, 0.0, 0.5, 0.0);
+        }
     }
 }

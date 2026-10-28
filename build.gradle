@@ -40,7 +40,7 @@ repositories {
     maven {
         name = 'Cosmopolitan (Create public maven)' // зеркало артефактов simibubi/Create
         url = 'https://maven.jaredlll08.com/releases'
-        content { includeGroupByRegex 'com\.simibubi.*' }
+        content { includeGroupByRegex 'com/.simibubi.*' }
     }
 }
 
@@ -143,7 +143,7 @@ dependencies {
     // Project id на Modrinth: "create". Версию смотри на странице мода -> Versions.
     // Если artifact с таким именем не найдётся — скачай jar вручную с Modrinth
     // и положи в libs/ (заглушка ниже подключена).
-    runtimeOnly "maven.modrinth:create:${create_version}"
+    runtimeOnly "maven.modrinth:create:${"6.0.10"}"
 
     // --- Cold Sweat через CURSEMEN ------------------------------------------------
     // CurseForge project cold-sweat: https://www.curseforge.com/minecraft/mc-mods/cold-sweat
@@ -171,6 +171,7 @@ dependencies {
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+    implementation("org.jspecify:jspecify:1.0.0")
 }
 
 // ModDev plugin должен видеть эти jar'ы в classpath рантайм-прогона:

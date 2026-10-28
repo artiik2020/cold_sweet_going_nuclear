@@ -1,6 +1,7 @@
 package com.yourname.myfirstmod.csgn.init;
 
 import com.yourname.myfirstmod.csgn.Csgn;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -15,11 +16,11 @@ public class ModItems {
             DeferredRegister.createItems(Csgn.MODID);
 
     // Предмет для csgn:reactor_core
-    public static final DeferredItem<Item> REACTOR_CORE_ITEM =
+    public static final DeferredItem<BlockItem> REACTOR_CORE_ITEM =
             ITEMS.registerSimpleBlockItem("reactor_core", ModBlocks.REACTOR_CORE);
 
     // Предмет для csgn:radiator
-    public static final DeferredItem<Item> RADIATOR_ITEM =
+    public static final DeferredItem<BlockItem> RADIATOR_ITEM =
             ITEMS.registerSimpleBlockItem("radiator", ModBlocks.RADIATOR);
 
     // =====================================================================================
