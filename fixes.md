@@ -1,126 +1,154 @@
-# Fixes and Change Log
+# Исправления и журнал изменений
 
-Project: **Cold Sweat + Create: Going Nuclear bridge**  
-Repository: [Artem4ik493/cold_sweet_going_nuclear](https://github.com/Artem4ik493/cold_sweet_going_nuclear)  
-Branch: `master`  
-Minecraft: 1.21.1 · NeoForge: 21.1.256
+**Проект:** мост между Cold Sweat и Create: Going Nuclear  
+**Репозиторий:** [Artem4ik493/cold_sweet_going_nuclear](https://github.com/Artem4ik493/cold_sweet_going_nuclear)  
+**Ветка:** `master`  
+**Minecraft:** 1.21.1 · **NeoForge:** 21.1.256
 
-This file records the fixes and implementation changes made during the runtime heat-integration review. It distinguishes code changes from behaviour that still needs to be verified in a real game.
+В этом файле ведётся история обнаруженных проблем, изменений в коде, ожидаемого результата и проверок. Исправление в коде не считается подтверждённым в игре, пока оно не прошло сборку и игровые тесты.
 
-## 2026-10-28 — Runtime heat integration review
+## 28 октября 2026 — интеграция нагрева и исправление компиляции
 
-### Main problem found
+### 1. Почему изначально не работал нагрев
 
-The mod could compile and launch while the heat integration still did nothing. The most important cause was that `ColdSweatAdapter.applyHeat(...)` was an empty TODO method. Reactor and pipe tick handlers could reach the adapter, but no Cold Sweat temperature value was changed.
+Во время проверки обнаружены несколько независимых проблем:
 
-There were also independent discovery/configuration problems: reactor and pipe ID lists were empty by default, cache entries could be rejected by a second strict ID check, and steam detection depended on an explicitly configured fluid ID.
+- Метод `ColdSweatAdapter.applyHeat(...)` был заглушкой и фактически не изменял температуру.
+- Списки ID реакторов и труб в конфигурации по умолчанию были пустыми. Из-за этого блоки могли не попадать в кэш либо отсеиваться дополнительной проверкой.
+- Проверка пара зависела от явно заданного ID жидкости, поэтому при пустой конфигурации не находила пар.
+- Труба Create может не предоставлять Fluid Handler capability непосредственно на позиции блока трубы. В таком случае обычная проверка capability не позволяет прочитать содержимое всей сети труб.
+- Реальная логика активности/нагрева реактора Going Nuclear пока не подтверждена по API конкретной версии мода.
 
-### Changes by file
+### 2. Изменения в обработчике температуры
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/bridge/ColdSweatAdapter.java`
 
-- Replaced the no-op heat method with a runtime adapter that attempts to call Cold Sweat's Temperature API.
-- It searches known API class-name candidates, finds the `WORLD` temperature trait, and tries `Temperature.add(entity, trait, amount)`; a `get/set` fallback is attempted if the add method is unavailable.
-- Temperature modification is performed for the target entity on the server side. The Cold Sweat API is expected to handle player synchronization.
-- Added diagnostics for successful API calls and failures, so an incompatible API/version should be easier to identify.
+- Вместо пустой заглушки добавлена попытка вызвать Temperature API Cold Sweat во время выполнения.
+- Адаптер ищет известные варианты имени API-класса, Trait `WORLD` и метод `add(entity, trait, amount)`; если он недоступен, пробует связку `get/set`.
+- Добавлена диагностика успешных вызовов и ошибок совместимости.
 
-**Effect intended:** nearby entities can receive a world-temperature adjustment from a detected heat source instead of the bridge silently doing nothing.
+**Ожидаемый результат:** обработчик источника тепла может передать изменение температуры игрока в Cold Sweat.
 
-**Important:** this uses runtime reflection and has not yet been confirmed against the exact Cold Sweat jar in a live game. If the installed version exposes a different API shape, the logs should identify the failure and the adapter may need a version-specific adjustment.
+**Ограничение:** адаптер использует reflection. Совместимость с установленным пользователем JAR Cold Sweat ещё нужно подтвердить запуском игры и просмотром логов.
+
+### 3. Обнаружение реакторов и труб
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/bridge/PositionCache.java`
 
-- Kept event-driven tracking for block placement/removal rather than scanning the entire world every tick.
-- Added candidate detection for the bridge's own `csgn:reactor_core` block.
-- Added heuristic recognition for likely Going Nuclear reactor blocks (mod namespace/path hints such as `goingnuclear`, `reactor`, `rbmk`, or `core`) and Create fluid pipes such as `create:fluid_pipe`.
-- Added helpers to validate cached reactor/pipe states without relying solely on config lists that may be empty.
-- Added debug diagnostics for cache additions/removals and candidate matching.
+- Сохранено событийное отслеживание размещения и удаления блоков, чтобы не сканировать весь мир каждый тик.
+- Добавлена поддержка собственного блока `csgn:reactor_core`.
+- Добавлены эвристики для возможных блоков Going Nuclear по namespace/path (например, `goingnuclear`, `reactor`, `rbmk`, `core`) и для трубы Create `create:fluid_pipe`.
+- Добавлены методы проверки состояния закэшированного блока и диагностические сообщения.
 
-**Effect intended:** relevant blocks can enter the cache with default configuration, while explicit server-config IDs remain available for reliable, installation-specific matching.
+**Ожидаемый результат:** кандидаты могут попадать в кэш без обязательного заполнения списков ID, а явная конфигурация ID остаётся доступной.
 
-**Limitation:** heuristic registry-name matching is a fallback, not proof of the actual IDs used by every Going Nuclear build. Confirm IDs from the installed mod jar and configure them explicitly if necessary.
+**Ограничение:** эвристики не заменяют проверку реальных registry ID. Для надёжной работы необходимо сверить ID с установленной версией Going Nuclear и при необходимости прописать их в конфигурации.
+
+### 4. Обнаружение пара
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/bridge/SteamFluidHelper.java`
 
-- Kept support for explicit configured steam-fluid IDs.
-- When the configured list is empty, added a fallback that recognises fluid registry paths containing `steam`.
-- Added debug logging for fluid matches and for blocks that do not expose a block Fluid Handler capability.
+- Оставлена возможность перечислить точные ID жидкостей в конфигурации.
+- Если список пуст, добавлена резервная проверка: путь ID жидкости должен содержать `steam`.
+- Добавлены сообщения о совпадении жидкости и об отсутствии Fluid Handler capability.
 
-**Effect intended:** steam detection no longer automatically fails just because the optional config list is empty.
+**Ожидаемый результат:** проверка пара не должна автоматически проваливаться только из-за пустого списка ID.
 
-**Limitation:** Create's fluid pipes may not expose a Forge/NeoForge Fluid Handler capability at the pipe block itself. If the helper logs that the capability is missing, a Create-specific fluid-network adapter is still needed; this change does not claim to read every connected pipe network.
+**Ограничение:** если труба Create не предоставляет capability на своей позиции, для чтения связанной сети потребуется отдельная интеграция с API жидкостной сети Create. Автоматическое опустошение или слив жидкости не реализованы.
+
+### 5. Обработчики нагрева
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/bridge/ReactorHandler.java`
 
-- Uses the updated position-cache validation helpers rather than rejecting blocks only because they are absent from the configured ID list.
-- Routes detected reactor heat through `ColdSweatAdapter.applyHeat(...)` for nearby players.
-- Added periodic debug output to help determine whether the handler sees candidate sources and applies its logic.
-
-**Effect intended:** a detected reactor can actually reach the Cold Sweat temperature adapter.
-
-**Limitation:** the current matching does not verify the reactor's internal active/hot state. A matching block may therefore affect nearby players even if the reactor is inactive; the exact Going Nuclear state API still needs verification.
+- Использует методы проверки кэшированного состояния вместо проверки только по списку настроенных ID.
+- Передаёт нагрев находящимся рядом игрокам через `ColdSweatAdapter.applyHeat(...)`.
+- Добавлены периодические диагностические сообщения о количестве кэшированных реакторов.
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/bridge/PipeHeatHandler.java`
 
-- Uses the updated pipe-cache validation helpers.
-- Checks steam fluid through the updated helper and routes detected heat to nearby players.
-- Added diagnostics for pipe candidates and steam matching.
+- Использует обновлённую проверку кэшированных труб.
+- Проверяет наличие пара через `SteamFluidHelper` и передаёт нагрев ближайшим игрокам.
+- Добавлены периодические диагностические сообщения о количестве кэшированных труб.
 
-**Effect intended:** the pipe heat path can operate when steam is identified, rather than failing immediately due to an empty fluid-ID list.
+**Ограничение обоих обработчиков:** обработка реактора пока не проверяет внутреннее состояние активности/температуры Going Nuclear. Поэтому распознанный блок может считаться источником тепла даже тогда, когда реактор выключен. Это необходимо исправить после проверки API мода.
 
-**Limitation:** actual fluid discovery depends on whether the pipe exposes a capability at its position. Connected Create fluid networks may require a dedicated integration.
+### 6. Значения нагрева по умолчанию
 
 #### `src/main/java/com/yourname/myfirstmod/csgn/BridgeConfig.java`
 
-- Lowered the default reactor heat multiplier from `1.0` to `0.05`.
-- Lowered the default steam heat multiplier from `0.5` to `0.025`.
+- Множитель нагрева реактора по умолчанию изменён с `1.0` на `0.05`.
+- Множитель нагрева пара по умолчанию изменён с `0.5` на `0.025`.
 
-**Reason:** these are conservative starting values for repeated server-tick temperature changes. They are intended to reduce the risk of an excessively fast temperature swing while the exact Cold Sweat API units and in-game response are being validated. Adjust them only after testing.
+Значения снижены как осторожная стартовая настройка для многократного изменения температуры во время тиков. Реальный эффект и подходящие величины необходимо определить игровым тестированием.
 
-#### `RUNTIME_HEAT_REVIEW.md`
+### 7. Исправление ошибки компиляции: `Iterable<ServerLevel>.stream()`
 
-- Added a focused review of the root causes, current runtime behaviour, test procedure, and remaining version-specific integration work.
+После предыдущих изменений пользователь получил две ошибки компиляции:
 
-### Event registration review
+```
+PipeHeatHandler.java:53: cannot find symbol
+event.getServer().getAllLevels().stream()
 
-The reactor and pipe handlers are registered on `NeoForge.EVENT_BUS` and use `ServerTickEvent.Post`. This is the appropriate gameplay event bus for those server tick handlers; moving these listeners to the mod event bus would not fix the no-op temperature adapter.
+ReactorHandler.java:49: cannot find symbol
+event.getServer().getAllLevels().stream()
+```
 
-### Expected behaviour after these changes
+**Причина:** в используемой версии API `getAllLevels()` возвращает `Iterable<ServerLevel>`, а не Java Stream. У такого значения нет метода `.stream()`.
 
-1. Relevant reactor/pipe candidates are tracked when placed or removed.
-2. Reactor handling can call the Cold Sweat adapter for nearby players.
-3. Pipe handling attempts to detect steam using configured IDs or a registry-name fallback.
-4. Diagnostics should help separate a cache/handler problem, a Cold Sweat API mismatch, and a missing Create fluid capability.
+**Исправлено в файлах:**
 
-The above is the intended implementation path, **not a claim that all of these paths have already been proven in-game**.
+- `src/main/java/com/yourname/myfirstmod/csgn/bridge/PipeHeatHandler.java`
+- `src/main/java/com/yourname/myfirstmod/csgn/bridge/ReactorHandler.java`
 
-## Verification status
+Подсчёт кэшированных труб и реакторов заменён обычным циклом `for (ServerLevel level : event.getServer().getAllLevels())` с накоплением количества в целочисленную переменную. Так используется интерфейс `Iterable` напрямую, без вызова отсутствующего метода `.stream()`.
 
-At the time this log was updated:
+**Статус:** исправление отправлено в GitHub в ветку `master`. После получения обновлений необходимо повторно запустить `compileJava`, чтобы подтвердить, что две ошибки устранены.
 
-- [x] Code review found and documented the no-op adapter and empty-config discovery issues.
-- [x] Changes were committed to the GitHub `master` branch.
-- [ ] The newest changes have not been independently confirmed by a fresh `compileJava` run in this review.
-- [ ] Runtime temperature change has not yet been confirmed in a live world.
-- [ ] Actual Going Nuclear registry IDs and active-reactor state still need verification.
-- [ ] Create pipe/tank capability behaviour and connected-network steam discovery still need verification.
+### 8. Предупреждения компилятора
 
-Do not treat the integration as fully validated until compilation and the in-game checks below pass.
+В выводе сборки также были предупреждения о deprecated API:
 
-## Test checklist
+- `EventBusSubscriber.bus()` и `EventBusSubscriber.Bus` в `Csgn.java`, строка 122.
+- Использование устаревшего API в `BridgeConfig.java`.
 
-1. Pull the latest branch:
-   ```powershell
-   git pull origin master
-   .\gradlew.bat compileJava
-   ```
-2. Launch Minecraft 1.21.1 with the matching NeoForge, Cold Sweat, Create, and Create: Going Nuclear versions.
-3. With cheats enabled, record the current values using `/temperature get @s world` and, if supported by the installed Cold Sweat version, `/temperature get @s core`.
-4. Stand near a matching reactor and wait at least 20 server ticks. Query the world temperature again and compare the result.
-5. If the temperature does not change, inspect the development log for messages from `CSGN/HeatTickHandler`, `CSGN/ColdSweatBridge`, and `CSGN/PositionCache`.
-6. For pipe testing, inspect `CSGN/SteamFluidHelper` for `steamMatch=true` or a message indicating that the block has no Fluid Handler capability. If the capability is absent, record the Create version and the exact pipe/tank arrangement.
-7. Report the full `compileJava` output and the relevant `CSGN` log lines before making further assumptions about the cause.
+Это **предупреждения, а не причины текущего провала компиляции**: сборка остановилась из-за двух ошибок `.stream()`. Их можно отдельно обновить под API установленной версии NeoForge после подтверждения актуального способа регистрации клиентских обработчиков и конфигурации. Без проверки не следует механически менять регистрацию событий, поскольку можно нарушить разделение клиентского и общего кода.
 
-## Earlier and current scope
+### 9. Регистрация событий
 
-This document records the bridge changes already made in this review, including the current documentation update. It does not claim that the separate mod's own reactor internals, fluid-network APIs, or every Cold Sweat version have been fully reverse-engineered. Future fixes should be appended here with the date, affected files, cause, implementation, and verification result.
+Обработчики серверного тика используют `ServerTickEvent.Post` и регистрируются на `NeoForge.EVENT_BUS`. Для игровых событий тика это правильная шина; перенос обработчиков на mod event bus не устранил бы пустую реализацию адаптера температуры.
+
+### 10. Документация обзора
+
+В `RUNTIME_HEAT_REVIEW.md` описаны исходные причины, текущее предполагаемое поведение, порядок тестирования и нерешённые вопросы интеграции с конкретными версиями модов.
+
+## Проверка и текущий статус
+
+- [x] Обнаружена и описана пустая реализация адаптера температуры.
+- [x] Исправлены проверки кэша и добавлены эвристики поиска кандидатов.
+- [x] Добавлена резервная проверка ID пара и диагностические сообщения.
+- [x] Исправлено использование `.stream()` для `Iterable<ServerLevel>` в двух обработчиках.
+- [x] История изменений дополнена этим журналом на русском языке.
+- [ ] Повторная сборка `compileJava` после последнего исправления ещё не подтверждена пользователем.
+- [ ] Изменение температуры не подтверждено тестом в живом мире.
+- [ ] Реальные ID блоков Going Nuclear и состояние работающего реактора необходимо проверить.
+- [ ] Обнаружение пара в сети Create необходимо подтвердить на реальной конфигурации труб и резервуаров.
+
+## Порядок проверки
+
+В PowerShell из корня проекта выполнить:
+
+```powershell
+git pull origin master
+.\gradlew.bat compileJava
+```
+
+Если сборка успешна:
+
+1. Запустить Minecraft 1.21.1 с совместимыми версиями NeoForge, Cold Sweat, Create и Create: Going Nuclear.
+2. В мире с включёнными читами проверить значение командой `/temperature get @s world` (и `/temperature get @s core`, если этот trait поддерживается установленной версией).
+3. Встать рядом с распознанным реактором и подождать не менее 20 серверных тиков; затем повторно проверить температуру.
+4. Если температура не меняется, проверить логи `CSGN/HeatTickHandler`, `CSGN/ColdSweatBridge` и `CSGN/PositionCache`.
+5. Для труб проверить сообщения `CSGN/SteamFluidHelper`: есть ли `steamMatch=true` или сообщение об отсутствии Fluid Handler capability.
+6. Если обнаружена проблема, приложить полный вывод `compileJava`, относящиеся к CSGN строки лога, версии модов и описание схемы труб/резервуаров.
+
+Не считать интеграцию полностью проверенной до успешной сборки и игрового теста.

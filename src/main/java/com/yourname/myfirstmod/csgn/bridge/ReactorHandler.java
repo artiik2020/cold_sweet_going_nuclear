@@ -45,9 +45,11 @@ public final class ReactorHandler {
         }
 
         if (++tickCounter % 1200 == 0) {
-            LOGGER.debug("Heat tick active; cached reactor positions={}",
-                event.getServer().getAllLevels().stream()
-                    .mapToInt(level -> PositionCache.reactors(level).size()).sum());
+            int cachedReactorCount = 0;
+            for (ServerLevel level : event.getServer().getAllLevels()) {
+                cachedReactorCount += PositionCache.reactors(level).size();
+            }
+            LOGGER.debug("Heat tick active; cached reactor positions={}", cachedReactorCount);
         }
     }
 

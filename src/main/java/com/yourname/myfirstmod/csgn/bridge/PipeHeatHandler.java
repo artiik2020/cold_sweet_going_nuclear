@@ -49,9 +49,11 @@ public final class PipeHeatHandler {
         }
 
         if (++tickCounter % 1200 == 0) {
-            LOGGER.debug("Steam heat tick active; cached pipe positions={}",
-                event.getServer().getAllLevels().stream()
-                    .mapToInt(level -> PositionCache.pipes(level).size()).sum());
+            int cachedPipeCount = 0;
+            for (ServerLevel level : event.getServer().getAllLevels()) {
+                cachedPipeCount += PositionCache.pipes(level).size();
+            }
+            LOGGER.debug("Steam heat tick active; cached pipe positions={}", cachedPipeCount);
         }
     }
 
