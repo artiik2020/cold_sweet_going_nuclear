@@ -9,12 +9,14 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Event-driven cache. It does not scan loaded chunks every tick.
+ * Tracks candidate heat-source blocks. Block events keep the cache current;
+ * scanNear also discovers blocks that were already present when the world loaded.
  */
 public final class PositionCache {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/PositionCache");
@@ -54,6 +56,50 @@ public final class PositionCache {
         reactors(level).remove(pos.immutable());
     }
 
+    /**
+     * Discovers candidates near a player without forcing unloaded chunks to load.
+     * The caller throttles this scan using UPDATE_INTERVAL.
+     */
+    public static void scanNear(ServerLevel level, BlockPos center, int requestedRadius) {
+        int radius = Math.max(1, Math.min(32, requestedRadius));
+        int radiusSquared = radius * radius;
+        int centerX = center.getX();
+        int centerY = center.getY();
+        int centerZ = center.getZ();
+        int minY = Math.max(level.getMinBuildHeight(), centerY - radius);
+        int maxY = Math.min(level.getMaxBuildHeight() - 1, centerY + radius);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int x = centerX - radius; x <= centerX + radius; x++) {
+            int dx = x - centerX;
+            for (int z = centerZ - radius; z <= centerZ + radius; z++) {
+                int dz = z - centerZ;
+                for (int y = minY; y <= maxY; y++) {
+                    int dy = y - centerY;
+                    if (dx * dx + dy * dy + dz * dz > radiusSquared) {
+                        continue;
+                    }
+
+                    cursor.set(x, y, z);
+                    if (!level.isLoaded(cursor)) {
+                        continue;
+                    }
+
+                    BlockState state = level.getBlockState(cursor);
+                    ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                    BlockPos immutablePos = cursor.immutable();
+
+                    if (isReactorCandidate(id, state) && reactors(level).add(immutablePos)) {
+                        LOGGER.debug("Discovered nearby reactor candidate {} at {}", id, immutablePos);
+                    }
+                    if (isPipeCandidate(id, state) && pipes(level).add(immutablePos)) {
+                        LOGGER.debug("Discovered nearby pipe candidate {} at {}", id, immutablePos);
+                    }
+                }
+            }
+        }
+    }
+
     public static void update(ServerLevel level, BlockPos pos, BlockState state) {
         BlockPos key = pos.immutable();
         remove(level, key);
@@ -73,8 +119,8 @@ public final class PositionCache {
         if (matches(state, BridgeConfig.REACTOR_BLOCK_IDS.get())) {
             return true;
         }
-        String namespace = id.getNamespace().toLowerCase(java.util.Locale.ROOT);
-        String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
+        String namespace = normalize(id.getNamespace());
+        String path = id.getPath().toLowerCase(Locale.ROOT);
         return (namespace.contains("goingnuclear")
                 && (path.contains("reactor") || path.contains("rbmk") || path.contains("core")))
             || (namespace.equals("csgn") && path.equals("reactor_core"));
@@ -84,10 +130,15 @@ public final class PositionCache {
         if (matches(state, BridgeConfig.PIPE_BLOCK_IDS.get())) {
             return true;
         }
-        String namespace = id.getNamespace().toLowerCase(java.util.Locale.ROOT);
-        String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
+        String namespace = normalize(id.getNamespace());
+        String path = id.getPath().toLowerCase(Locale.ROOT);
         return namespace.equals("create")
-            && (path.contains("fluid_pipe") || path.equals("fluid_pipe"));
+            && (path.contains("fluid_pipe") || path.contains("fluid_valve")
+                || path.contains("smart_fluid_pipe"));
+    }
+
+    private static String normalize(String value) {
+        return value.toLowerCase(Locale.ROOT).replace("_", "").replace("-", "");
     }
 
     public static boolean isCachedReactorState(BlockState state) {
@@ -104,6 +155,7 @@ public final class PositionCache {
         BlockPos key = pos.immutable();
         reactors(level).remove(key);
         pipes(level).remove(key);
+        SteamFluidHelper.invalidate(level, key);
     }
 
     public static void removeDimension(ResourceLocation dimension) {

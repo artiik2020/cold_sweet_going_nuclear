@@ -27,15 +27,15 @@ public final class BridgeConfig {
 
     static {
         BUILDER.push("heat");
-        REACTOR_RADIUS = BUILDER.comment("Maximum reactor heat radius in blocks.")
-            .defineInRange("reactorRadius", 100.0, 1.0, 256.0);
+        REACTOR_RADIUS = BUILDER.comment("Maximum reactor heat radius in blocks. Nearby discovery is limited to a safe scan radius of 32 blocks.")
+            .defineInRange("reactorRadius", 16.0, 1.0, 32.0);
         PIPE_RADIUS = BUILDER.comment("Maximum steam pipe heat radius in blocks.")
             .defineInRange("pipeRadius", 5.0, 1.0, 32.0);
-        REACTOR_HEAT_MULTIPLIER = BUILDER.comment("Relative reactor heat strength.")
-            .defineInRange("reactorHeatMultiplier", 0.05, 0.0, 10.0);
-        STEAM_HEAT_MULTIPLIER = BUILDER.comment("Relative steam pipe heat strength.")
-            .defineInRange("steamHeatMultiplier", 0.025, 0.0, 10.0);
-        UPDATE_INTERVAL = BUILDER.comment("Cached-position processing interval in server ticks.")
+        REACTOR_HEAT_MULTIPLIER = BUILDER.comment("Peak reactor heat contribution in Cold Sweat Minecraft temperature units. Contribution fades with distance.")
+            .defineInRange("reactorHeatMultiplier", 0.20, 0.0, 2.0);
+        STEAM_HEAT_MULTIPLIER = BUILDER.comment("Peak steam heat contribution in Cold Sweat Minecraft temperature units. Contribution fades with distance.")
+            .defineInRange("steamHeatMultiplier", 0.10, 0.0, 2.0);
+        UPDATE_INTERVAL = BUILDER.comment("Nearby block discovery and steam-capability refresh interval in ticks. Player heat offset is refreshed every server level tick.")
             .defineInRange("updateInterval", 20, 1, 1200);
         BUILDER.pop();
 

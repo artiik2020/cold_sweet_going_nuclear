@@ -1,6 +1,5 @@
 package com.yourname.myfirstmod.csgn.bridge;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
@@ -9,25 +8,33 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Cold Sweat compatibility without a hard compile dependency.
+ * Optional Cold Sweat adapter. It only uses the documented Temperature get/set API,
+ * resolved at runtime so the bridge can compile without bundling Cold Sweat classes.
  *
- * Cold Sweat's public Temperature API is discovered at runtime so this bridge
- * can still load when Cold Sweat is absent. Temperature changes are applied
- * on the logical server through the API, which is responsible for syncing
- * player temperature to the client.
+ * The value applied is an offset to each player's WORLD trait (Minecraft temperature
+ * units), not a global mutation of the biome or every block in the level.
  */
 public final class ColdSweatAdapter {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/ColdSweatBridge");
-    private static boolean loggedMissingApi = false;
-    private static boolean loggedSuccess = false;
+    private static final double EPSILON = 0.0001;
 
-    private static final String[] TEMPERATURE_CLASSES = {
-        "com.momosoftworks.coldsweat.api.util.Temperature",
-        "com.momosoftworks.coldsweat.api.temperature.Temperature",
-        "com.momosoftworks.coldsweat.api.temperature.TempHelper"
-    };
+    private static final Map<UUID, AppliedState> APPLIED = new ConcurrentHashMap<>();
+    private static volatile ApiBinding binding;
+    private static volatile boolean resolutionAttempted;
+    private static volatile boolean loggedMissingApi;
+    private static volatile boolean loggedSuccess;
+
+    private record AppliedState(double contribution, double lastSetValue) {}
+    private record ApiBinding(Method get, Method set, Object worldTrait, String className) {}
+
+    private static final String TEMPERATURE_CLASS =
+        "com.momosoftworks.coldsweat.api.util.Temperature";
 
     private ColdSweatAdapter() {}
 
@@ -36,77 +43,118 @@ public final class ColdSweatAdapter {
     }
 
     /**
-     * Adds heat to the player's Cold Sweat world-temperature trait.
-     * Strength is a relative Cold Sweat temperature amount, not Celsius.
+     * Updates this player's desired ambient heat contribution.
+     *
+     * Calling add(WORLD, amount) every tick would accumulate an unbounded offset.
+     * Instead, this method changes the previously applied contribution to the new
+     * target, and re-applies it if Cold Sweat has recalculated the WORLD trait since
+     * our last tick. A zero target removes our tracked contribution.
      */
-    public static boolean applyHeat(ServerLevel level, BlockPos source, ServerPlayer player, double strength) {
-        if (level.isClientSide() || strength <= 0.0 || !isAvailable()) {
+    public static boolean applyWorldHeat(ServerLevel level, ServerPlayer player, double desiredOffset) {
+        if (level.isClientSide() || !isAvailable() || !Double.isFinite(desiredOffset)) {
             return false;
         }
 
-        for (String className : TEMPERATURE_CLASSES) {
+        double desired = Math.max(0.0, desiredOffset);
+        UUID playerId = player.getUUID();
+        AppliedState previous = APPLIED.get(playerId);
+
+        if (previous == null && desired <= EPSILON) {
+            return true;
+        }
+
+        ApiBinding api = resolveApi();
+        if (api == null) {
+            return false;
+        }
+
+        try {
+            Object currentObject = api.get().invoke(null, (LivingEntity) player, api.worldTrait());
+            if (!(currentObject instanceof Number currentNumber)) {
+                LOGGER.warn("Cold Sweat Temperature.get returned a non-numeric WORLD value");
+                return false;
+            }
+
+            double current = currentNumber.doubleValue();
+            double target;
+            if (previous == null) {
+                target = current + desired;
+            } else if (Math.abs(current - previous.lastSetValue()) <= EPSILON) {
+                // Our previous value is still present: replace only our own contribution.
+                target = current - previous.contribution() + desired;
+            } else {
+                // Cold Sweat or another modifier changed WORLD after our previous tick.
+                // Treat the current value as a fresh baseline and re-apply the desired offset.
+                target = current + desired;
+            }
+
+            api.set().invoke(null, (LivingEntity) player, api.worldTrait(), target);
+            if (desired <= EPSILON) {
+                APPLIED.remove(playerId);
+            } else {
+                APPLIED.put(playerId, new AppliedState(desired, target));
+            }
+
+            if (!loggedSuccess) {
+                LOGGER.info("Cold Sweat WORLD temperature bridge connected through {}.get/set",
+                    api.className());
+                loggedSuccess = true;
+            }
+            return true;
+        } catch (ReflectiveOperationException | LinkageError exception) {
+            LOGGER.warn("Failed to update Cold Sweat WORLD temperature for player {}", player.getGameProfile().getName(), exception);
+            return false;
+        }
+    }
+
+    private static ApiBinding resolveApi() {
+        ApiBinding current = binding;
+        if (current != null || resolutionAttempted) {
+            return current;
+        }
+
+        synchronized (ColdSweatAdapter.class) {
+            if (binding != null || resolutionAttempted) {
+                return binding;
+            }
+            resolutionAttempted = true;
+
             try {
-                Class<?> temperatureClass = Class.forName(className);
+                Class<?> temperatureClass = Class.forName(TEMPERATURE_CLASS);
                 Class<?> traitClass = findTraitClass(temperatureClass);
                 if (traitClass == null || !traitClass.isEnum()) {
-                    continue;
+                    throw new ReflectiveOperationException("Temperature.Trait enum was not found");
                 }
 
                 Object worldTrait = enumConstant(traitClass, "WORLD");
-                if (worldTrait == null) {
-                    continue;
-                }
-
-                // Preferred documented API: Temperature.add(entity, Trait.WORLD, amount).
-                Method add = findMethod(temperatureClass, "add", 3);
-                if (add != null) {
-                    add.invoke(null, (LivingEntity) player, worldTrait, strength);
-                    logSuccess(className, "add");
-                    return true;
-                }
-
-                // Compatibility fallback for API builds that expose get/set but not add.
                 Method get = findMethod(temperatureClass, "get", 2);
                 Method set = findMethod(temperatureClass, "set", 3);
-                if (get != null && set != null) {
-                    Object current = get.invoke(null, (LivingEntity) player, worldTrait);
-                    if (current instanceof Number number) {
-                        set.invoke(null, (LivingEntity) player, worldTrait, number.doubleValue() + strength);
-                        logSuccess(className, "get/set");
-                        return true;
-                    }
+                if (worldTrait == null || get == null || set == null) {
+                    throw new ReflectiveOperationException(
+                        "Expected static Temperature.get(LivingEntity, Trait) and set(LivingEntity, Trait, double)");
                 }
-            } catch (ClassNotFoundException ignored) {
-                // Try the next documented/legacy package name.
+
+                binding = new ApiBinding(get, set, worldTrait, temperatureClass.getName());
+                return binding;
             } catch (ReflectiveOperationException | LinkageError exception) {
-                LOGGER.warn("Cold Sweat temperature API call failed using {}", className, exception);
+                if (!loggedMissingApi) {
+                    LOGGER.error("Cold Sweat is installed, but its documented Temperature get/set API could not be resolved. " +
+                        "Check the installed Cold Sweat version. Heat integration is disabled rather than using an unsafe fallback.",
+                        exception);
+                    loggedMissingApi = true;
+                }
+                return null;
             }
         }
-
-        if (!loggedMissingApi) {
-            LOGGER.error("Cold Sweat is loaded, but its public Temperature API could not be resolved. " +
-                "Check the installed Cold Sweat version and its API package.");
-            loggedMissingApi = true;
-        }
-        return false;
     }
 
-    private static Class<?> findTraitClass(Class<?> temperatureClass) {
+    private static Class<?> findTraitClass(Class<?> temperatureClass) throws ClassNotFoundException {
         for (Class<?> nested : temperatureClass.getDeclaredClasses()) {
             if (nested.getSimpleName().equals("Trait") && nested.isEnum()) {
                 return nested;
             }
         }
-
-        String packageName = temperatureClass.getPackageName();
-        for (String suffix : new String[] {".Temperature$Trait", ".util.Temperature$Trait"}) {
-            try {
-                return Class.forName(packageName + suffix);
-            } catch (ClassNotFoundException ignored) {
-                // Continue searching.
-            }
-        }
-        return null;
+        return Class.forName(temperatureClass.getName() + "$Trait");
     }
 
     private static Object enumConstant(Class<?> enumClass, String name) {
@@ -122,15 +170,12 @@ public final class ColdSweatAdapter {
         for (Method method : owner.getMethods()) {
             if (!method.getName().equals(name)
                 || method.getParameterCount() != parameterCount
-                || !java.lang.reflect.Modifier.isStatic(method.getModifiers())) {
+                || !Modifier.isStatic(method.getModifiers())) {
                 continue;
             }
 
             Class<?>[] parameters = method.getParameterTypes();
-            if (!LivingEntity.class.isAssignableFrom(parameters[0])) {
-                continue;
-            }
-            if (!parameters[1].isEnum()) {
+            if (!parameters[0].isAssignableFrom(LivingEntity.class) || !parameters[1].isEnum()) {
                 continue;
             }
             if (parameterCount == 3
@@ -141,12 +186,5 @@ public final class ColdSweatAdapter {
             return method;
         }
         return null;
-    }
-
-    private static void logSuccess(String className, String method) {
-        if (!loggedSuccess) {
-            LOGGER.info("Cold Sweat bridge connected using {}.{}()", className, method);
-            loggedSuccess = true;
-        }
     }
 }

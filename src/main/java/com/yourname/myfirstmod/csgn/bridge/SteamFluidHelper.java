@@ -1,6 +1,7 @@
 package com.yourname.myfirstmod.csgn.bridge;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -12,9 +13,20 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Reads fluids exposed through NeoForge's FluidHandler capability.
+ * Create fluid pipes are transport blocks, not necessarily fluid inventories,
+ * so adjacent tanks/machines are checked as well.
+ */
 public final class SteamFluidHelper {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/SteamFluidHelper");
+    private static final Map<ResourceLocation, Map<BlockPos, CachedCheck>> CACHE = new ConcurrentHashMap<>();
+
+    private record CachedCheck(long tick, boolean containsSteam) {}
+
     private SteamFluidHelper() {}
 
     public static boolean containsConfiguredSteam(ServerLevel level, BlockPos pos) {
@@ -22,9 +34,46 @@ public final class SteamFluidHelper {
             return false;
         }
 
-        IFluidHandler handler = level.getCapability(Capabilities.FluidHandler.BLOCK, pos, null);
+        ResourceLocation dimension = level.dimension().location();
+        Map<BlockPos, CachedCheck> dimensionCache =
+            CACHE.computeIfAbsent(dimension, ignored -> new ConcurrentHashMap<>());
+        BlockPos key = pos.immutable();
+        long now = level.getGameTime();
+        CachedCheck previous = dimensionCache.get(key);
+        int interval = Math.max(1, BridgeConfig.UPDATE_INTERVAL.get());
+
+        if (previous != null && now - previous.tick() < interval) {
+            return previous.containsSteam();
+        }
+
+        boolean found = inspectBlock(level, key, null);
+        if (!found) {
+            for (Direction direction : Direction.values()) {
+                BlockPos adjacent = key.relative(direction);
+                if (!level.isLoaded(adjacent)) {
+                    continue;
+                }
+
+                // Query the adjacent inventory from the face looking toward the pipe.
+                if (inspectBlock(level, adjacent, direction.getOpposite())) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found) {
+            found = inspectConnectedCreateNetwork(level, key);
+        }
+
+        dimensionCache.put(key, new CachedCheck(now, found));
+        LOGGER.debug("Steam check at {} in {}: {}", key, dimension, found);
+        return found;
+    }
+
+    private static boolean inspectBlock(ServerLevel level, BlockPos pos, Direction side) {
+        IFluidHandler handler = level.getCapability(Capabilities.FluidHandler.BLOCK, pos, side);
         if (handler == null) {
-            LOGGER.debug("No block FluidHandler capability at {}", pos);
             return false;
         }
 
@@ -40,11 +89,9 @@ public final class SteamFluidHelper {
                 continue;
             }
 
-            boolean steam = configured.contains(fluidId.toString())
-                || (configured.isEmpty() && fluidId.getPath().toLowerCase(Locale.ROOT).contains("steam"));
+            boolean steam = isSteam(fluidId, configured);
             LOGGER.debug("Fluid at {}: {} amount={} steamMatch={}",
                 pos, fluidId, stack.getAmount(), steam);
-
             if (steam) {
                 return true;
             }
@@ -53,9 +100,35 @@ public final class SteamFluidHelper {
     }
 
     /**
-     * Draining is intentionally explicit: this helper never drains a pipe automatically.
-     * The returned stack is still steam; conversion to water and insertion into a destination
-     * must be handled by a radiator/condensation block implementation.
+     * TODO: Artem's Task - Implement Create fluid-network traversal after verifying
+     * the installed Create API and its connected-network semantics.
+     *
+     * Safe default: return false. Nearby FluidHandler inventories are still checked
+     * above, so this unfinished extension does not prevent the bridge from starting.
+     */
+    private static boolean inspectConnectedCreateNetwork(ServerLevel level, BlockPos pipe) {
+        return false;
+    }
+
+    private static boolean isSteam(ResourceLocation id, List<? extends String> configured) {
+        return configured.contains(id.toString())
+            || (configured.isEmpty() && id.getPath().toLowerCase(Locale.ROOT).contains("steam"));
+    }
+
+    public static void invalidate(ServerLevel level, BlockPos pos) {
+        Map<BlockPos, CachedCheck> dimensionCache = CACHE.get(level.dimension().location());
+        if (dimensionCache != null) {
+            dimensionCache.remove(pos.immutable());
+        }
+    }
+
+    public static void clearDimension(ResourceLocation dimension) {
+        CACHE.remove(dimension);
+    }
+
+    /**
+     * Draining is deliberately separate from detection. This method is not called
+     * by the heat handler and will not consume fluid as a side effect of checking.
      */
     public static FluidStack drainConfiguredSteam(ServerLevel level, BlockPos pos, int amount) {
         if (amount <= 0 || !level.isLoaded(pos)) {
@@ -79,8 +152,7 @@ public final class SteamFluidHelper {
                 continue;
             }
 
-            FluidStack request = new FluidStack(present.getFluid(),
-                Math.min(amount, present.getAmount()));
+            FluidStack request = new FluidStack(present.getFluid(), Math.min(amount, present.getAmount()));
             FluidStack simulated = handler.drain(request, IFluidHandler.FluidAction.SIMULATE);
             if (simulated.isEmpty()) {
                 return FluidStack.EMPTY;
@@ -89,10 +161,5 @@ public final class SteamFluidHelper {
         }
 
         return FluidStack.EMPTY;
-    }
-
-    private static boolean isSteam(ResourceLocation id, List<? extends String> configured) {
-        return configured.contains(id.toString())
-            || (configured.isEmpty() && id.getPath().toLowerCase(Locale.ROOT).contains("steam"));
     }
 }

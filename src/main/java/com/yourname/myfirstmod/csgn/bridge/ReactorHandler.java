@@ -3,69 +3,67 @@ package com.yourname.myfirstmod.csgn.bridge;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Calculates local heat from cached reactor candidates.
+ * The main tick event and final temperature write are handled by HeatTickHandler.
+ */
 public final class ReactorHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/HeatTickHandler");
-    private static long tickCounter;
+
     private ReactorHandler() {}
 
-    public static void onServerTick(ServerTickEvent.Post event) {
-        if (event.getServer() == null) {
-            return;
-        }
+    public static double heatForPlayer(ServerLevel level, ServerPlayer player) {
+        double radius = BridgeConfig.REACTOR_RADIUS.get();
+        double radiusSquared = radius * radius;
+        double total = 0.0;
+        List<BlockPos> stale = new ArrayList<>();
 
-        int interval = BridgeConfig.UPDATE_INTERVAL.get();
-        for (ServerLevel level : event.getServer().getAllLevels()) {
-            if (level.getGameTime() % interval != 0L) {
+        for (BlockPos reactor : PositionCache.reactors(level)) {
+            if (!level.isLoaded(reactor)) {
                 continue;
             }
 
-            List<BlockPos> stale = new ArrayList<>();
-            for (BlockPos reactor : PositionCache.reactors(level)) {
-                if (!level.isLoaded(reactor)) {
-                    continue;
-                }
-
-                if (!PositionCache.isCachedReactorState(level.getBlockState(reactor))) {
-                    stale.add(reactor);
-                    continue;
-                }
-
-                applyHeatToNearbyPlayers(level, reactor,
-                    BridgeConfig.REACTOR_RADIUS.get(),
-                    BridgeConfig.REACTOR_HEAT_MULTIPLIER.get());
+            if (!PositionCache.isCachedReactorState(level.getBlockState(reactor))) {
+                stale.add(reactor);
+                continue;
             }
-            PositionCache.reactors(level).removeAll(stale);
+
+            double distanceSquared = player.distanceToSqr(
+                reactor.getX() + 0.5, reactor.getY() + 0.5, reactor.getZ() + 0.5);
+            if (distanceSquared > radiusSquared) {
+                continue;
+            }
+
+            if (!isOperationalReactor(level, reactor)) {
+                continue;
+            }
+
+            double distance = Math.sqrt(distanceSquared);
+            double falloff = Math.max(0.0, 1.0 - distance / radius);
+            total += BridgeConfig.REACTOR_HEAT_MULTIPLIER.get() * falloff;
         }
 
-        if (++tickCounter % 1200 == 0) {
-            int cachedReactorCount = 0;
-            for (ServerLevel level : event.getServer().getAllLevels()) {
-                cachedReactorCount += PositionCache.reactors(level).size();
-            }
-            LOGGER.debug("Heat tick active; cached reactor positions={}", cachedReactorCount);
+        for (BlockPos pos : stale) {
+            PositionCache.remove(level, pos);
         }
+
+        return total;
     }
 
-    private static void applyHeatToNearbyPlayers(
-        ServerLevel level, BlockPos source, double radius, double strength
-    ) {
-        double radiusSquared = radius * radius;
-        double centerX = source.getX() + 0.5;
-        double centerY = source.getY() + 0.5;
-        double centerZ = source.getZ() + 0.5;
-
-        for (ServerPlayer player : level.players()) {
-            if (player.distanceToSqr(centerX, centerY, centerZ) > radiusSquared) {
-                continue;
-            }
-            ColdSweatAdapter.applyHeat(level, source, player, strength);
-        }
+    /**
+     * TODO: Artem's Task - Verify the actual active/hot state exposed by the installed
+     * Create: Going Nuclear version and replace this permissive default with that check.
+     *
+     * Safe, working default: recognised reactor blocks emit heat. This avoids inventing
+     * a field or method from Going Nuclear's internal API.
+     */
+    private static boolean isOperationalReactor(ServerLevel level, BlockPos pos) {
+        return true;
     }
 }
