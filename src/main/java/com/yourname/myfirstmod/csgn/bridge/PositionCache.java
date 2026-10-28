@@ -6,17 +6,18 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.event.level.BlockEvent;
-import net.neoforged.neoforge.event.level.LevelEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Position cache populated by block-place/break events and optional targeted scans.
- * No loaded-chunk-wide scans are performed here.
+ * Event-driven cache. It does not scan loaded chunks every tick.
  */
 public final class PositionCache {
+    private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/PositionCache");
     private PositionCache() {}
 
     private static final Map<ResourceLocation, Set<BlockPos>> REACTORS = new ConcurrentHashMap<>();
@@ -42,14 +43,11 @@ public final class PositionCache {
         }
     }
 
-    public static void onChunkLoad(LevelEvent.Load event) {
-        // TODO: Artem's Task
-        // If persistent discovery is needed, inspect only positions known to this mod.
-        // Do not scan every block in a chunk or every loaded chunk on every tick.
-    }
-
     public static void registerReactor(ServerLevel level, BlockPos pos) {
-        reactors(level).add(pos.immutable());
+        BlockPos key = pos.immutable();
+        if (reactors(level).add(key)) {
+            LOGGER.debug("Cached reactor candidate at {} in {}", key, level.dimension().location());
+        }
     }
 
     public static void unregisterReactor(ServerLevel level, BlockPos pos) {
@@ -59,12 +57,47 @@ public final class PositionCache {
     public static void update(ServerLevel level, BlockPos pos, BlockState state) {
         BlockPos key = pos.immutable();
         remove(level, key);
-        if (matches(state, BridgeConfig.REACTOR_BLOCK_IDS.get())) {
+
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        if (isReactorCandidate(id, state)) {
             reactors(level).add(key);
+            LOGGER.debug("Cached reactor candidate {} at {}", id, key);
         }
-        if (matches(state, BridgeConfig.PIPE_BLOCK_IDS.get())) {
+        if (isPipeCandidate(id, state)) {
             pipes(level).add(key);
+            LOGGER.debug("Cached pipe candidate {} at {}", id, key);
         }
+    }
+
+    private static boolean isReactorCandidate(ResourceLocation id, BlockState state) {
+        if (matches(state, BridgeConfig.REACTOR_BLOCK_IDS.get())) {
+            return true;
+        }
+        String namespace = id.getNamespace().toLowerCase(java.util.Locale.ROOT);
+        String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
+        return (namespace.contains("goingnuclear")
+                && (path.contains("reactor") || path.contains("rbmk") || path.contains("core")))
+            || (namespace.equals("csgn") && path.equals("reactor_core"));
+    }
+
+    private static boolean isPipeCandidate(ResourceLocation id, BlockState state) {
+        if (matches(state, BridgeConfig.PIPE_BLOCK_IDS.get())) {
+            return true;
+        }
+        String namespace = id.getNamespace().toLowerCase(java.util.Locale.ROOT);
+        String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
+        return namespace.equals("create")
+            && (path.contains("fluid_pipe") || path.equals("fluid_pipe"));
+    }
+
+    public static boolean isCachedReactorState(BlockState state) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        return isReactorCandidate(id, state);
+    }
+
+    public static boolean isCachedPipeState(BlockState state) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        return isPipeCandidate(id, state);
     }
 
     public static void remove(ServerLevel level, BlockPos pos) {

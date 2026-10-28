@@ -4,11 +4,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public final class PipeHeatHandler {
+    private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/SteamPipeHeatHandler");
+    private static long tickCounter;
     private PipeHeatHandler() {}
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -28,7 +32,7 @@ public final class PipeHeatHandler {
                     continue;
                 }
 
-                if (!PositionCache.matches(level.getBlockState(pipe), BridgeConfig.PIPE_BLOCK_IDS.get())) {
+                if (!PositionCache.isCachedPipeState(level.getBlockState(pipe))) {
                     stale.add(pipe);
                     continue;
                 }
@@ -37,10 +41,17 @@ public final class PipeHeatHandler {
                     continue;
                 }
 
-                applyHeatToNearbyPlayers(level, pipe, BridgeConfig.PIPE_RADIUS.get(),
+                applyHeatToNearbyPlayers(level, pipe,
+                    BridgeConfig.PIPE_RADIUS.get(),
                     BridgeConfig.STEAM_HEAT_MULTIPLIER.get());
             }
             PositionCache.pipes(level).removeAll(stale);
+        }
+
+        if (++tickCounter % 1200 == 0) {
+            LOGGER.debug("Steam heat tick active; cached pipe positions={}",
+                event.getServer().getAllLevels().stream()
+                    .mapToInt(level -> PositionCache.pipes(level).size()).sum());
         }
     }
 
@@ -56,7 +67,7 @@ public final class PipeHeatHandler {
             if (player.distanceToSqr(centerX, centerY, centerZ) > radiusSquared) {
                 continue;
             }
-            ColdSweatAdapter.applyHeat(level, source, player.blockPosition(), strength);
+            ColdSweatAdapter.applyHeat(level, source, player, strength);
         }
     }
 }

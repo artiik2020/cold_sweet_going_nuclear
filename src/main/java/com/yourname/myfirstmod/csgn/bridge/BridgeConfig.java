@@ -32,9 +32,9 @@ public final class BridgeConfig {
         PIPE_RADIUS = BUILDER.comment("Maximum steam pipe heat radius in blocks.")
             .defineInRange("pipeRadius", 5.0, 1.0, 32.0);
         REACTOR_HEAT_MULTIPLIER = BUILDER.comment("Relative reactor heat strength.")
-            .defineInRange("reactorHeatMultiplier", 1.0, 0.0, 100.0);
+            .defineInRange("reactorHeatMultiplier", 0.05, 0.0, 10.0);
         STEAM_HEAT_MULTIPLIER = BUILDER.comment("Relative steam pipe heat strength.")
-            .defineInRange("steamHeatMultiplier", 0.5, 0.0, 100.0);
+            .defineInRange("steamHeatMultiplier", 0.025, 0.0, 10.0);
         UPDATE_INTERVAL = BUILDER.comment("Cached-position processing interval in server ticks.")
             .defineInRange("updateInterval", 20, 1, 1200);
         BUILDER.pop();

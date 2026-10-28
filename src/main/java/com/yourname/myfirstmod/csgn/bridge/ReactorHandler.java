@@ -4,11 +4,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public final class ReactorHandler {
+    private static final Logger LOGGER = LoggerFactory.getLogger("CSGN/HeatTickHandler");
+    private static long tickCounter;
     private ReactorHandler() {}
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -28,23 +32,25 @@ public final class ReactorHandler {
                     continue;
                 }
 
-                if (!PositionCache.matches(level.getBlockState(reactor), BridgeConfig.REACTOR_BLOCK_IDS.get())) {
+                if (!PositionCache.isCachedReactorState(level.getBlockState(reactor))) {
                     stale.add(reactor);
                     continue;
                 }
 
-                // TODO: Artem's Task — read the active/hot state from the verified Going Nuclear API.
-                applyHeatToNearbyPlayers(level, reactor, BridgeConfig.REACTOR_RADIUS.get(),
+                applyHeatToNearbyPlayers(level, reactor,
+                    BridgeConfig.REACTOR_RADIUS.get(),
                     BridgeConfig.REACTOR_HEAT_MULTIPLIER.get());
             }
             PositionCache.reactors(level).removeAll(stale);
         }
+
+        if (++tickCounter % 1200 == 0) {
+            LOGGER.debug("Heat tick active; cached reactor positions={}",
+                event.getServer().getAllLevels().stream()
+                    .mapToInt(level -> PositionCache.reactors(level).size()).sum());
+        }
     }
 
-    /**
-     * Processes players rather than iterating every block in a large radius.
-     * This avoids millions of block checks for a 100-block reactor radius.
-     */
     private static void applyHeatToNearbyPlayers(
         ServerLevel level, BlockPos source, double radius, double strength
     ) {
@@ -57,7 +63,7 @@ public final class ReactorHandler {
             if (player.distanceToSqr(centerX, centerY, centerZ) > radiusSquared) {
                 continue;
             }
-            ColdSweatAdapter.applyHeat(level, source, player.blockPosition(), strength);
+            ColdSweatAdapter.applyHeat(level, source, player, strength);
         }
     }
 }
