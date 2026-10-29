@@ -44,6 +44,9 @@ public final class CondensationHandler {
         HeatZoneManager zones = HeatZoneManager.get(level);
         if (zones == null || zones.pipeCount() == 0) return;
 
+        // МЕХАНИКА №1: хук для опциональной задачи #9 — «ливень конденсата» из конденсаторов.
+        condenseAroundCondensers(level);
+
         // Снимок ключей, чтобы безопасно удалять из карты во время обхода
         for (BlockPos pipePos : zones.pipeSnapshotKeys()) {
             // ИСПРАВЛЕНО: точечная проверка загрузки вместо скана чанков
@@ -56,6 +59,36 @@ public final class CondensationHandler {
 
             condenseInto(level, pipePos, radiatorPos);
         }
+    }
+
+    /**
+     * МЕХАНИКА №1 (заготовка для задачи #9 в SAM.md): вызывается из основного тика.
+     * Сейчас — ПУСТОЙ безопасный хук: компилируется, ничего не делает, поведение мода НЕ меняется.
+     * Твоя задача (опционально): найти вокруг конденсаторы и «выдоить» из стыкующихся с ними
+     * труб немного пара в красивые капли воды + звук. Подсказки внутри.
+     */
+    private void condenseAroundCondensers(ServerLevel level) {
+        // TODO: Artem's Optional Task - [Ливень конденсата из Конденсатора] (задача #9 в SAM.md)
+        //
+        // Логика по шагам (обход ТОЛЬКО локальной окрестности, без скана мира!):
+        //   1) HeatZoneManager zones = HeatZoneManager.get(level); пройди по zones.pipeSnapshotKeys();
+        //   2) у каждой трубы проверь 6 соседей: if (ModBlocks.isCondenser(level.getBlockState(neighbor)))
+        //      -> это «конденсаторная» труба;
+        //   3) Вытяни пар: FluidStack steam = SteamFluidHelper.drainSteam(
+        //            fluidHandlerAt(level, pipePos), Config.condenseAmountMb / 4, true);
+        //      (делим на 4 — конденсатор работает мягче радиатора; isEmpty() -> пропускаем)
+        //   4) Эффекты над конденсатором:
+        //      level.playSound(null, condenserPos, SoundEvents.LAVA_EXTINGUISH,
+        //                      SoundSource.BLOCKS, 0.3f, 1.8f);
+        //      level.sendParticles(net.minecraft.core.particles.ParticleTypes.SPLASH,
+        //              cx + 0.5, cy + 1.1, cz + 0.5, 4, 0.2, 0.1, 0.2, 0.02);
+        //
+        // ПОДВОДНЫЕ КАМНИ JAVA:
+        //  - sendParticles: ParticleType<?> константа, count int, затем 3 double смещения + speed —
+        //    ровно как в spawnBurstParticles у PipeBurstHandler (количество аргументов проверяется
+        //    компилятором строго!);
+        //  - никогда не мутируй Set во время for-each — используй snapshot-копию pipeSnapshotKeys();
+        //  - паттерн SIMULATE->EXECUTE уже показан в condenseInto() ниже — повторяй его.
     }
 
     /**

@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ExplosionEvent;
+import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 /**
  * Быстрый путь регистрации реакторов: при установке/ломке блока сверяем его ID
@@ -61,5 +62,24 @@ public final class ReactorEventHandler {
                 zones.removeReactorZone(pos);
             }
         }
+    }
+
+    /**
+     * МЕХАНИКА №2: периодический опрос «живых» реакторов.
+     * Раз в Config.reactorDynamicScanIntervalTicks тиков HeatZoneManager заглядывает
+     * внутрь BlockEntity каждого закэшированного реактора через GoingNuclearBridge
+     * и обновляет динамический множитель зоны (холодный реактор греет слабее,
+     * раскрученный на максимум — сильнее).
+     */
+    @SubscribeEvent
+    public void onLevelTickPost(LevelTickEvent.Post event) {
+        if (!Config.reactorEffectsEnabled || !Config.reactorDynamicHeatEnabled) return;
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (level.getGameTime() % Math.max(10, Config.reactorDynamicScanIntervalTicks) != 0) return;
+
+        HeatZoneManager zones = HeatZoneManager.get(level);
+        if (zones == null || zones.reactorCount() == 0) return;
+
+        zones.refreshDynamicReactorMultipliers(level);
     }
 }

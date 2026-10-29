@@ -74,6 +74,42 @@ public class Config {
     public static final ModConfigSpec.IntValue MAX_TRACKED_SOURCES =
             B.comment("Максимум отслеживаемых источников тепла (защита от TPS-убийц)").defineInRange("perf.maxTrackedSources", 4096, 16, 65536);
 
+    // ================= МЕХАНИКА №1: ЛОПАЮЩИЕСЯ ТРУБЫ (Pipe Stress & Bursting) =================
+    public static final ModConfigSpec.BooleanValue PIPE_BURST_ENABLED =
+            B.comment("Включено ли перенапряжение паровых сетей (трубы лопаются после лимита длины цепи)")
+                    .define("pipes.burst.enabled", true);
+
+    public static final ModConfigSpec.IntValue PIPE_CHAIN_LIMIT =
+            B.comment("Максимальная длина НЕПРЕРЫВНОЙ цепи труб с паром до разрыва. " +
+                            "Конденсатор (csgn:condenser) сбрасывает счётчик.")
+                    .defineInRange("pipes.burst.chainLimit", 64, 8, 1024);
+
+    public static final ModConfigSpec.IntValue PIPE_SCAN_INTERVAL_TICKS =
+            B.comment("Как часто (в тиках) запускать BFS-обход помеченных паровых сетей")
+                    .defineInRange("pipes.burst.scanIntervalTicks", 100, 20, 1200);
+
+    public static final ModConfigSpec.IntValue PIPE_MAX_VISITED_PER_SCAN =
+            B.comment("Жёсткий потолок узлов, посещаемых одним BFS-проходом (страховка от TPS-убийц)")
+                    .defineInRange("pipes.burst.maxVisitedPerScan", 4096, 64, 65536);
+
+    // ================= МЕХАНИКА №2: ДИНАМИЧЕСКОЕ ТЕПЛО РЕАКТОРА (Going Nuclear) =================
+    public static final ModConfigSpec.BooleanValue REACTOR_DYNAMIC_HEAT_ENABLED =
+            B.comment("true: мощность зоны реактора зависит от его внутренней температуры (чтение BlockEntity через reflection); " +
+                            "false: всегда статический множитель из конфига")
+                    .define("reactor.dynamicHeatEnabled", true);
+
+    public static final ModConfigSpec.DoubleValue REACTOR_MIN_ACTIVITY_SCALE =
+            B.comment("Множитель силы зоны при полностью ХОЛОДНОМ/выключенном реакторе")
+                    .defineInRange("reactor.minActivityScale", 0.15, 0.0, 1.0);
+
+    public static final ModConfigSpec.DoubleValue REACTOR_MAX_ACTIVITY_SCALE =
+            B.comment("Множитель силы зоны при РЕАКТОРЕ НА МАКСИМУМЕ")
+                    .defineInRange("reactor.maxActivityScale", 1.5, 0.0, 10.0);
+
+    public static final ModConfigSpec.IntValue REACTOR_DYNAMIC_SCAN_INTERVAL_TICKS =
+            B.comment("Как часто (в тиках) опрашивать BlockEntity реакторов о их внутреннем состоянии")
+                    .defineInRange("reactor.dynamicScanIntervalTicks", 40, 10, 600);
+
     // ===================== ОПЦИОНАЛЬНЫЕ ФИЧИ (заготовки для задач Артема) =====================
     // ВНИМАНИЕ: эти значения по умолчанию ВЫКЛЮЧЕНЫ. Пока код в обработчиках не дописан,
     // конфиг можно трогать смело — ничего не сломается. См. SAM.md, задачи #2 и #4.
@@ -107,6 +143,18 @@ public class Config {
     public static int heatApplyIntervalTicks = 10;
     public static int condenseIntervalTicks = 40;
     public static int maxTrackedSources = 4096;
+
+    // ---- МЕХАНИКА №1: лопающиеся трубы (дефолты совпадают с SPEC) ----
+    public static boolean pipeBurstEnabled = true;
+    public static int pipeChainLimit = 64;
+    public static int pipeScanIntervalTicks = 100;
+    public static int pipeMaxVisitedPerScan = 4096;
+
+    // ---- МЕХАНИКА №2: динамическое тепло реактора ----
+    public static boolean reactorDynamicHeatEnabled = true;
+    public static double reactorMinActivityScale = 0.15;
+    public static double reactorMaxActivityScale = 1.5;
+    public static int reactorDynamicScanIntervalTicks = 40;
 
     // ---- Опциональные фичи: дефолты ВЫКЛЮЧЕНЫ, чтобы мода можно было не трогать ----
     public static double hotPipeBurnChance = 0.0;   // Task #4 (0.0 = урона нет)
@@ -159,6 +207,18 @@ public class Config {
         heatApplyIntervalTicks    = Math.max(1, HEAT_APPLY_INTERVAL_TICKS.get());
         condenseIntervalTicks     = Math.max(1, CONDENSE_INTERVAL_TICKS.get());
         maxTrackedSources         = MAX_TRACKED_SOURCES.get();
+
+        // Механика №1: лопающиеся трубы
+        pipeBurstEnabled          = PIPE_BURST_ENABLED.get();
+        pipeChainLimit            = Math.max(8, PIPE_CHAIN_LIMIT.get());
+        pipeScanIntervalTicks     = Math.max(20, PIPE_SCAN_INTERVAL_TICKS.get());
+        pipeMaxVisitedPerScan     = Math.max(64, PIPE_MAX_VISITED_PER_SCAN.get());
+
+        // Механика №2: динамическое тепло реактора
+        reactorDynamicHeatEnabled = REACTOR_DYNAMIC_HEAT_ENABLED.get();
+        reactorMinActivityScale   = REACTOR_MIN_ACTIVITY_SCALE.get();
+        reactorMaxActivityScale   = Math.max(REACTOR_MIN_ACTIVITY_SCALE.get(), REACTOR_MAX_ACTIVITY_SCALE.get());
+        reactorDynamicScanIntervalTicks = Math.max(10, REACTOR_DYNAMIC_SCAN_INTERVAL_TICKS.get());
 
         reactorEffectsEnabled     = REACTOR_EFFECTS_ENABLED.get();
         reactorHeatRadius         = Math.max(1, REACTOR_HEAT_RADIUS.get());

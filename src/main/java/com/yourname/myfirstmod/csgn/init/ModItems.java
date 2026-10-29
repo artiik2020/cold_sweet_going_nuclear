@@ -23,16 +23,23 @@ public class ModItems {
     public static final DeferredItem<BlockItem> RADIATOR_ITEM =
             ITEMS.registerSimpleBlockItem("radiator", ModBlocks.RADIATOR);
 
+    // МЕХАНИКА №1: предмет для csgn:condenser (блок сброса счётчика паровой сети)
+    public static final DeferredItem<BlockItem> CONDENSER_ITEM =
+            ITEMS.registerSimpleBlockItem("condenser", ModBlocks.CONDENSER);
+
     // =====================================================================================
-    // TODO: Artem's Task — Создай свой первый предмет! Например «стержень с ураном»:
+    // TODO: Artem's Optional Task - [Свой первый блок с нуля] (задача #10 в SAM.md)
+    // Когда зарегистрируешь свой класс блока в ModBlocks — добавь ему предмет ОДНОЙ строкой:
+    //
+    // public static final DeferredItem<BlockItem> HOT_CASING_ITEM =
+    //         ITEMS.registerSimpleBlockItem("hot_casing", ModBlocks.HOT_CASING);
+    //
+    // И ещё «простой предмет» без блока (уровень «разминка»):
     //
     // public static final DeferredItem<Item> URANIUM_ROD =
     //         ITEMS.registerSimpleItem("uranium_rod", new Item.Properties().stacksTo(16));
     //
-    // Тебя ждут:
-    //  1) картинка assets/csgn/textures/item/uranium_rod.png (16x16 PNG);
-    //  2) название "item.csgn.uranium_rod" в lang-файлах;
-    //  3) простой крафт data/csgn/recipe/uranium_rod.json — шаблон уже лежит
-    //     в data/csgn/recipe/reactor_core.json, скопируй и поменяй items.
+    // Тебя ждут: текстура 16x16 в textures/item|block, model JSON, lang-запись.
+    // Шаблон крафта уже лежит в data/csgn/recipe/reactor_core.json.
     // =====================================================================================
 }

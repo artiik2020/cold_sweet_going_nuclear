@@ -44,10 +44,12 @@ public final class CsgnDebug {
         double temp = ColdSweatBridge.getTemperature(player);
 
         String msg = String.format(
-                "[CSGN] reactors=%d pipes=%d | heatHere=%.3f | radiusR=%d radiusP=%d multR=%.2f multP=%.2f | CS temp=%s",
-                zones.reactorCount(), zones.pipeCount(), heatHere,
+                "[CSGN] reactors=%d pipes=%d dirtyNets=%d | heatHere=%.3f | radiusR=%d radiusP=%d multR=%.2f multP=%.2f | chainLimit=%d | CS temp=%s",
+                zones.reactorCount(), zones.pipeCount(), com.yourname.myfirstmod.csgn.handler.PipeNetworkWalker.dirtyCount(),
+                heatHere,
                 Config.reactorHeatRadius, Config.steamPipeHeatRadius,
                 Config.reactorHeatMultiplier, Config.steamPipeHeatMultiplier,
+                Config.pipeChainLimit,
                 Double.isNaN(temp) ? "N/A(API)" : String.format("%.2f°C", temp));
 
         player.displayClientMessage(Component.literal(msg).withStyle(ChatFormatting.YELLOW), false);

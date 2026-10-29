@@ -32,16 +32,38 @@ public final class SteamPipeHeatHandler {
         updatePipeZone(level, pos);
         // Соседи могли получить/потерять соединение с сетью — обновляем их тоже.
         for (Direction dir : Direction.values()) {
-            updatePipeZone(level, pos.relative(dir));
+            BlockPos neighbor = pos.relative(dir);
+            updatePipeZone(level, neighbor);
+            markNetworkDirtyIfNeeded(level, neighbor);
         }
+        markNetworkDirtyIfNeeded(level, pos);
     }
 
-    /** Трубу сломали — сразу снимаем её зону из кэша. */
+    /** Трубу сломали — сразу снимаем её зону из кэша и пересчитываем соседей. */
     @SubscribeEvent
     public void onBlockBreak(BlockEvent.BreakEvent event) {
         if (event.getLevel().isClientSide()) return;
-        HeatZoneManager zones = HeatZoneManager.get((ServerLevel) event.getLevel());
-        if (zones != null) zones.removeSteamPipeZone(event.getPos());
+        ServerLevel level = (ServerLevel) event.getLevel();
+        HeatZoneManager zones = HeatZoneManager.get(level);
+        BlockPos pos = event.getPos();
+        if (zones != null) zones.removeSteamPipeZone(pos);
+        PipeNetworkWalker.unmarkDirty(pos);
+        // Сеть могла разорваться/удлинить другую ветку — соседи теперь «подозрительные» источники.
+        for (Direction dir : Direction.values()) {
+            BlockPos neighbor = pos.relative(dir);
+            if (level.isLoaded(neighbor)) {
+                updatePipeZone(level, neighbor);
+                markNetworkDirtyIfNeeded(level, neighbor);
+            }
+        }
+    }
+
+    /** Конденсатор поставили/сломали — все сети рядом обязаны быть пересчитаны (сброс счётчика!). */
+    private void markNetworkDirtyIfNeeded(ServerLevel level, BlockPos pos) {
+        if (!Config.pipeBurstEnabled) return;
+        if (PipeNetworkWalker.isSteamNode(level, pos)) {
+            PipeNetworkWalker.markDirty(pos);
+        }
     }
 
     /** Раз в интервал перепроверяем ТОЛЬКО закэшированные позиции (без скана мира!). */
@@ -57,8 +79,13 @@ public final class SteamPipeHeatHandler {
         for (BlockPos pos : zones.pipeSnapshotKeys()) {
             // ИСПРАВЛЕНО: level.isLoaded(pos) вместо обращения к незагруженным чанкам
             if (!level.isLoaded(pos)) continue;
-            if (!checkHasSteam(level, pos)) {
+            if (checkHasSteam(level, pos)) {
+                // Пар есть — помечаем позицию как источник для BFS-обхода PipeNetworkWalker.
+                // Именно с этих точек считается длина цепи «лопающихся труб».
+                PipeNetworkWalker.markDirty(pos);
+            } else {
                 zones.removeSteamPipeZone(pos); // пар ушёл из трубы — снимаем зону
+                PipeNetworkWalker.unmarkDirty(pos);
             }
         }
     }
@@ -74,6 +101,7 @@ public final class SteamPipeHeatHandler {
             BlockState state = level.getBlockState(pos);
             double mult = (ModBlocks.isRadiator(state) && Config.radiatorDoublesHeat) ? 2.0 : 1.0;
             zones.addSteamPipeZone(pos, mult);
+            if (Config.pipeBurstEnabled) PipeNetworkWalker.markDirty(pos); // новая труба — сеть изменилась
 
             // TODO: Artem's Optional Task - [Медный радиатор конденсирует быстрее] (задача #5 в SAM.md)
             // Подсказка: здесь ты сможешь поставить множитель для нового блока COPPER_RADIATOR,

@@ -44,6 +44,7 @@ public class Csgn {
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.ReactorEventHandler());
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.SteamPipeHeatHandler());
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.CondensationHandler());
+        NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.handler.PipeBurstHandler());
         NeoForge.EVENT_BUS.register(new com.yourname.myfirstmod.csgn.debug.CsgnDebug());
 
         // 5) ПЕРВЫЙ refresh() конфига. Без него статические поля Config останутся
@@ -73,5 +74,18 @@ public class Csgn {
                 Config.reactorHeatMultiplier, Config.reactorBlockWhitelist);
         LOGGER.info("[CSGN] Пар: enabled={}, radius={}, fluidPrefixes={}",
                 Config.steamPipeEffectsEnabled, Config.steamPipeHeatRadius, Config.steamFluidPrefixes);
+        LOGGER.info("[CSGN] Лопающиеся трубы: enabled={}, chainLimit={}, scanInterval={}",
+                Config.pipeBurstEnabled, Config.pipeChainLimit, Config.pipeScanIntervalTicks);
+        LOGGER.info("[CSGN] Динамическое тепло реакторов: enabled={}, scale={}..{}, interval={}",
+                Config.reactorDynamicHeatEnabled, Config.reactorMinActivityScale,
+                Config.reactorMaxActivityScale, Config.reactorDynamicScanIntervalTicks);
+    }
+
+    /** Итоговая сводка по интеграциям — вызывается один раз на старте. */
+    @SuppressWarnings("unused")
+    private static String integrationSummary() {
+        return "create=" + ModList.get().isLoaded("create")
+                + ", cold_sweat=" + ModList.get().isLoaded(ColdSweatBridge.MODID)
+                + ", goingnuclear=" + com.yourname.myfirstmod.csgn.integration.GoingNuclearBridge.GOING_NUCLEAR_LOADED;
     }
 }

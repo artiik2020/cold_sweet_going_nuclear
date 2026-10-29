@@ -1,6 +1,7 @@
 package com.yourname.myfirstmod.csgn.init;
 
 import com.yourname.myfirstmod.csgn.Csgn;
+import com.yourname.myfirstmod.csgn.block.CondenserBlock;
 import com.yourname.myfirstmod.csgn.block.RadiatorBlock;
 import com.yourname.myfirstmod.csgn.block.ReactorCoreBlock;
 import net.minecraft.world.level.block.Block;
@@ -35,9 +36,22 @@ public class ModBlocks {
                             .strength(4.0f)
                             .sound(SoundType.COPPER)));
 
+    /** МЕХАНИКА №1: Конденсатор — сбрасывает счётчик длины паровой сети (ставь каждые <=63 трубы). */
+    public static final DeferredBlock<CondenserBlock> CONDENSER =
+            BLOCKS.register("condenser",
+                    () -> new CondenserBlock(BlockBehaviour.Properties.of()
+                            .mapColor(MapColor.METAL)
+                            .strength(3.5f)
+                            .sound(SoundType.COPPER)));
+
     /** Помогает обработчикам определить «это наш радиатор?». */
     public static boolean isRadiator(net.minecraft.world.level.block.state.BlockState state) {
         return state.is(RADIATOR.get());
+    }
+
+    /** «Это наш конденсатор?» — спрашивает PipeNetworkWalker во время BFS. */
+    public static boolean isCondenser(net.minecraft.world.level.block.state.BlockState state) {
+        return state.is(CONDENSER.get());
     }
 
     // =====================================================================================
@@ -58,20 +72,13 @@ public class ModBlocks {
     // }
     // =====================================================================================
 
-    //public static final DeferredRegister<Block> HOT_CASING =
-    //       BLOCKS.register("hot_casing",
-    //               () -> new Block(BlockBehaviour.Properties.of()
-    //                       .mapColor(MapColor.METAL).strength(3.0f)));
     // =====================================================================================
-    // TODO: Artem's Task — Зарегистрируй здесь свой блок! Например «горячий корпус»:
-    //
-    // public static final DeferredBlock<Block> HOT_CASING =
-    //         BLOCKS.register("hot_casing",
-    //                 () -> new Block(BlockBehaviour.Properties.of()
-    //                         .mapColor(MapColor.METAL).strength(3.0f)));
-    //
-    // Не забудь: BlockItem в ModItems, blockstate+model JSON, текстура, lang-запись.
-    // А ещё можно добавить ID нового блока в reactor.blockWhitelist конфига —
-    // и он сразу начнёт греться без единой строчки кода!
+    // TODO: Artem's Optional Task - [Свой декоративный блок] (задача #10 в SAM.md)
+    // Попробуй повторить регистрацию КОНДЕНСАТОРА сам, «на глаз», не подглядывая:
+    //   1) создай класс (например block/HotCasingBlock extends Block с конструктором Properties);
+    //   2) скопируй блок CONDENSER выше, поменяй имя/свойства;
+    //   3) добавь предмет в ModItems одной строкой registerSimpleBlockItem(...);
+    //   4) lang-запись + model JSON (шаблон — en_us.json и data/csgn/recipe/*).
+    // Это самый частый рабочий процесс мододела — набей руку на четвёртом блоке!
     // =====================================================================================
 }
